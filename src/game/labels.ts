@@ -34,7 +34,10 @@ export function resultText(result: GameResult): string {
     case 'resign':
       return `${loser} menyerah — ${winner} menang`;
     case 'timeout':
-      return `Waktu ${loser} habis — ${winner} menang`;
+      // Tanpa pemenang: lawan kehabisan waktu, tetapi bidak pemenang tidak cukup untuk skakmat.
+      return winner
+        ? `Waktu ${loser} habis — ${winner} menang`
+        : 'Remis — waktu habis, bidak tidak cukup';
     case 'abandoned':
       return `${loser} meninggalkan permainan — ${winner} menang`;
     case 'stalemate':
@@ -47,6 +50,8 @@ export function resultText(result: GameResult): string {
       return 'Remis — aturan 50 langkah';
     case 'agreement':
       return 'Remis atas kesepakatan';
+    case 'aborted':
+      return 'Permainan dibatalkan';
   }
 }
 

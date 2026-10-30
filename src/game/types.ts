@@ -29,7 +29,8 @@ export type EndReason =
   | 'repetition'
   | '50move'
   | 'agreement'
-  | 'abandoned';
+  | 'abandoned'
+  | 'aborted';
 
 export type GameResult = { winner?: Color; reason: EndReason };
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { opposite } from '../game/engine.ts';
-import { findTimeControl, type TimeControl } from '../game/timeControl.ts';
-import type { Color } from '../game/types.ts';
+import { OnlineGame, type OnlineGameView } from '../game/onlineGame.ts';
+import { findTimeControl } from '../game/timeControl.ts';
+import type { Color, LegalTarget, MoveInput, Square } from '../game/types.ts';
 import { getClientId, loadName } from '../net/identity.ts';
 import { PeerJsTransport } from '../net/peerjs.ts';
 import {
@@ -30,19 +30,32 @@ type RoomState = {
   error: SessionErrorCode | null;
   /** Nama yang dikirim ke lawan saat sesi dimulai. */
   myName: string;
-  myColor: Color | null;
-  timeControl: TimeControl | null;
   opponentName: string | null;
+  /** Keadaan permainan untuk UI; null sebelum masuk ruangan. */
+  game: OnlineGameView | null;
+
   enter: (params: EnterParams) => void;
   /** Mulai ulang sesi (tombol "Coba lagi" / "Sambung ulang"). */
   retry: () => void;
   leave: () => void;
   /** Keluar di tick berikutnya; dibatalkan bila halaman langsung masuk lagi (StrictMode). */
   leaveSoon: () => void;
+
+  // Aksi permainan (fungsi stabil, aman dipakai sebagai prop).
+  legalTargets: (from: Square) => LegalTarget[];
+  move: (input: MoveInput) => void;
+  resign: () => void;
+  abort: () => void;
+  offerDraw: () => void;
+  acceptDraw: () => void;
+  declineDraw: () => void;
+  offerRematch: () => void;
+  acceptRematch: () => void;
 };
 
 const CODE_TAKEN_RETRIES = 3;
 const CODE_TAKEN_RETRY_MS = 2_000;
+const CLOCK_TICK_MS = 250;
 
 const INITIAL = {
   code: null,
@@ -50,42 +63,55 @@ const INITIAL = {
   status: 'idle',
   error: null,
   myName: '',
-  myColor: null,
-  timeControl: null,
   opponentName: null,
+  game: null,
 } satisfies Partial<RoomState>;
 
 export const useRoomStore = create<RoomState>((set, get) => {
   let session: Session | null = null;
+  let game: OnlineGame | null = null;
   let current: EnterParams | null = null;
   let leaveTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let ticker: ReturnType<typeof setInterval> | null = null;
 
   const teardown = () => {
     if (retryTimer) clearTimeout(retryTimer);
+    if (ticker) clearInterval(ticker);
     retryTimer = null;
+    ticker = null;
     session?.close();
     session = null;
+    game = null;
   };
 
-  const start = (params: EnterParams, attempt = 0) => {
-    const role: Role = params.host ? 'host' : 'guest';
+  /** Buat Session baru; OnlineGame tetap dipakai sehingga permainan tidak hilang. */
+  const connect = (params: EnterParams, attempt = 0) => {
+    const g = game;
+    if (!g) return;
     const s: Session = new Session(
       new PeerJsTransport(),
-      role,
+      params.host ? 'host' : 'guest',
       { name: get().myName, clientId: getClientId() },
       {
-        onStatus: (status) => session === s && set({ status }),
+        onStatus: (status) => {
+          if (session !== s) return;
+          set({ status });
+          g.setConnected(status === 'connected');
+        },
+        onConnect: () => {
+          // Host selalu mengirim keadaan lengkap; tamu menunggu `sync`.
+          if (session === s && params.host) g.sendSync();
+        },
+        onMessage: (msg) => session === s && g.receive(msg),
         onPeer: ({ name }) => session === s && set({ opponentName: name }),
-        onStart: ({ hostColor, timeControl }) =>
-          session === s && set({ myColor: opposite(hostColor), timeControl }),
         onError: (error) => {
           if (session !== s) return;
           if (error === 'code-taken' && params.host && attempt < CODE_TAKEN_RETRIES) {
             // Kode masih tercatat di server (mis. host baru memuat ulang halaman):
             // tunggu server melepasnya lalu daftar lagi, tanpa menampilkan galat.
             session = null;
-            retryTimer = setTimeout(() => start(params, attempt + 1), CODE_TAKEN_RETRY_MS);
+            retryTimer = setTimeout(() => connect(params, attempt + 1), CODE_TAKEN_RETRY_MS);
             return;
           }
           set({ error });
@@ -93,28 +119,28 @@ export const useRoomStore = create<RoomState>((set, get) => {
       },
     );
     session = s;
-
-    if (params.host) {
-      const timeControl = findTimeControl(params.host.timeControlId)?.value ?? null;
-      void s.host(params.code, { hostColor: params.host.color, timeControl });
-    } else {
-      void s.join(params.code);
-    }
+    if (params.host) void s.host(params.code);
+    else void s.join(params.code);
   };
 
   const begin = (params: EnterParams) => {
     teardown();
     current = params;
-    const host = params.host;
-    set({
-      ...INITIAL,
-      code: params.code,
-      role: host ? 'host' : 'guest',
-      myName: loadName(),
-      myColor: host?.color ?? null,
-      timeControl: host ? (findTimeControl(host.timeControlId)?.value ?? null) : null,
+    const role: Role = params.host ? 'host' : 'guest';
+    set({ ...INITIAL, code: params.code, role, myName: loadName() });
+
+    const g: OnlineGame = new OnlineGame({
+      role,
+      send: (t, d) => session?.send(t, d),
+      onChange: () => game === g && set({ game: g.view() }),
     });
-    start(params);
+    game = g;
+    if (params.host) {
+      g.startNew(params.host.color, findTimeControl(params.host.timeControlId)?.value ?? null);
+    }
+    set({ game: g.view() });
+    ticker = setInterval(() => game?.tick(), CLOCK_TICK_MS);
+    connect(params);
   };
 
   return {
@@ -133,7 +159,15 @@ export const useRoomStore = create<RoomState>((set, get) => {
     },
 
     retry: () => {
-      if (current) begin(current);
+      if (!current) return;
+      // Sambung ulang dengan permainan yang sama; bila belum ada permainan, mulai dari awal.
+      if (game && get().status !== 'error') {
+        session?.close();
+        session = null;
+        connect(current);
+      } else {
+        begin(current);
+      }
     },
 
     leave: () => {
@@ -149,5 +183,15 @@ export const useRoomStore = create<RoomState>((set, get) => {
         get().leave();
       }, 0);
     },
+
+    legalTargets: (from) => game?.legalTargets(from) ?? [],
+    move: (input) => void game?.move(input),
+    resign: () => game?.resign(),
+    abort: () => game?.abort(),
+    offerDraw: () => game?.offerDraw(),
+    acceptDraw: () => game?.acceptDraw(),
+    declineDraw: () => game?.declineDraw(),
+    offerRematch: () => game?.offerRematch(),
+    acceptRematch: () => game?.acceptRematch(),
   };
 });

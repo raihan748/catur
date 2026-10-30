@@ -54,14 +54,16 @@ Acuan: [PRD.md](PRD.md) dan [design.md](design.md). Estimasi untuk 1 developer, 
 **Selesai bila**: dua tab/dua perangkat berbeda jaringan terhubung dan bertukar `hello`.
 
 ## Fase 3 — Permainan Online (3 hk)
-- [ ] Sambungkan `Board` ke store + transport: kirim/terima `move`
-- [ ] Validasi ulang langkah lawan; `sync` bila tidak cocok
-- [ ] Kunci papan: hanya giliran sendiri & warna sendiri
-- [ ] Jam (performance.now), increment, timeout, sinkronisasi saat `move`
-- [ ] Aksi: menyerah (konfirmasi), tawar/terima/tolak remis, batal awal permainan
-- [ ] Modal hasil + rematch (tukar warna)
-- [ ] Status bar koneksi, toast
-- [ ] E2E Playwright: dua konteks memainkan *Fool's mate* sampai skakmat
+- [x] `game/onlineGame.ts` (tanpa React) + `store/roomStore.ts`: kirim/terima `move`
+- [x] Validasi ulang langkah lawan; host mengirim `sync` (tamu meminta `sync_request`) bila tidak cocok
+- [x] Kunci papan: hanya giliran sendiri, warna sendiri, dan saat tersambung
+- [x] Jam (performance.now), increment, timeout (+ remis bila pemenang tak punya bahan skakmat), jam dijeda saat terputus
+- [x] Aksi: menyerah (konfirmasi dua langkah), tawar/terima/tolak remis, batal sebelum langkah ke-2
+- [x] Dialog hasil + rematch (tukar warna)
+- [x] Banner koneksi, toast
+- [x] Tamu muat ulang di tengah permainan → posisi & jam dipulihkan lewat `sync`
+- [x] Uji dua pemain: 18 test `OnlineGame` (termasuk *Fool's mate*) + uji manual dua tab
+- [ ] E2E Playwright dua konteks (ditunda: perlu unduh browser Playwright dan server PeerJS publik)
 
 **Selesai bila**: permainan lengkap host vs tamu berjalan sampai selesai dengan semua jenis hasil.
 

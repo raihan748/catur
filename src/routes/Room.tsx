@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
-import Board from '../components/board/Board.tsx';
 import Header from '../components/Header.tsx';
-import PlayerBar from '../components/PlayerBar.tsx';
-import '../components/game.css';
+import OnlineGameScreen from '../components/online/OnlineGameScreen.tsx';
 import '../components/room.css';
-import { GameEngine, opposite } from '../game/engine.ts';
-import { COLOR_NAMES, colorTitle } from '../game/labels.ts';
+import { colorTitle } from '../game/labels.ts';
 import { timeControlDescription, type TimeControl } from '../game/timeControl.ts';
-import type { Color, LegalTarget } from '../game/types.ts';
+import type { Color } from '../game/types.ts';
 import type { SessionErrorCode } from '../net/session.ts';
 import { parseHostRouteState, useRoomStore } from '../store/roomStore.ts';
 import { formatRoomCode, isValidRoomCode, normalizeRoomCode } from '../utils/roomCode.ts';
@@ -63,9 +60,8 @@ export default function Room() {
   const status = useRoomStore((s) => s.status);
   const error = useRoomStore((s) => s.error);
   const myName = useRoomStore((s) => s.myName);
-  const myColor = useRoomStore((s) => s.myColor);
-  const timeControl = useRoomStore((s) => s.timeControl);
   const opponentName = useRoomStore((s) => s.opponentName);
+  const game = useRoomStore((s) => s.game);
 
   useEffect(() => {
     if (!valid) return;
@@ -82,7 +78,7 @@ export default function Room() {
     );
   }
 
-  if (storeCode !== code || status === 'idle') {
+  if (storeCode !== code || status === 'idle' || !game || !role) {
     return <Notice title="Menyiapkan ruangan…" busy />;
   }
 
@@ -105,42 +101,41 @@ export default function Room() {
 
   if (status === 'creating') return <Notice title="Membuat ruangan…" busy />;
 
-  if (status === 'connecting') {
-    return <Notice title={`Menghubungkan ke ruangan ${formatRoomCode(code)}…`} busy />;
+  // Host: belum ada tamu yang pernah masuk.
+  if (role === 'host' && (status === 'waiting' || !opponentName)) {
+    return <WaitingCard code={code} myColor={game.myColor} timeControl={game.timeControl} />;
   }
 
-  if (status === 'connected' && myColor) {
-    return (
-      <ConnectedView
-        myName={myName}
-        myColor={myColor}
-        opponentName={opponentName}
-        timeControl={timeControl}
-      />
-    );
+  // Tamu: belum menerima permainan dari host.
+  if (role === 'guest' && game.game === 0) {
+    if (status === 'disconnected') {
+      return (
+        <Notice title="Koneksi terputus">
+          <p>Sambungan ke host terputus sebelum permainan dimulai.</p>
+          <div className="form-actions form-actions--start">
+            <button type="button" className="btn btn--primary" onClick={retry}>
+              Sambung ulang
+            </button>
+            <HomeLink />
+          </div>
+        </Notice>
+      );
+    }
+    const title =
+      status === 'connecting'
+        ? `Menghubungkan ke ruangan ${formatRoomCode(code)}…`
+        : 'Menyiapkan permainan…';
+    return <Notice title={title} busy />;
   }
 
-  if (role === 'guest') {
-    return (
-      <Notice title="Koneksi terputus">
-        <p>Sambungan ke lawan terputus.</p>
-        <div className="form-actions form-actions--start">
-          <button type="button" className="btn btn--primary" onClick={retry}>
-            Sambung ulang
-          </button>
-          <HomeLink />
-        </div>
-      </Notice>
-    );
-  }
-
-  // Host: menunggu tamu pertama, atau tamu yang terputus tersambung kembali.
   return (
-    <WaitingCard
+    <OnlineGameScreen
+      view={game}
+      role={role}
       code={code}
-      myColor={myColor}
-      timeControl={timeControl}
-      opponentLeft={status === 'disconnected'}
+      myName={myName}
+      opponentName={opponentName}
+      connection={status}
     />
   );
 }
@@ -184,12 +179,11 @@ const HomeLink = () => (
 
 type WaitingCardProps = {
   code: string;
-  myColor: Color | null;
+  myColor: Color;
   timeControl: TimeControl | null;
-  opponentLeft: boolean;
 };
 
-function WaitingCard({ code, myColor, timeControl, opponentLeft }: WaitingCardProps) {
+function WaitingCard({ code, myColor, timeControl }: WaitingCardProps) {
   const [copied, setCopied] = useState<'code' | 'link' | null>(null);
   const link = `${window.location.origin}/r/${code}`;
   const canShare = typeof navigator.share === 'function';
@@ -213,11 +207,9 @@ function WaitingCard({ code, myColor, timeControl, opponentLeft }: WaitingCardPr
   return (
     <Shell>
       <section className="card waiting">
-        <h1 className="card__title">{opponentLeft ? 'Lawan terputus' : 'Ruangan siap'}</h1>
+        <h1 className="card__title">Ruangan siap</h1>
         <p className="waiting__lead">
-          {opponentLeft
-            ? 'Menunggu lawan tersambung kembali dengan kode yang sama.'
-            : 'Bagikan kode ini ke lawanmu. Permainan dimulai begitu ia masuk.'}
+          Bagikan kode ini ke lawanmu. Permainan dimulai begitu ia masuk.
         </p>
 
         <p className="room-code">
@@ -247,7 +239,7 @@ function WaitingCard({ code, myColor, timeControl, opponentLeft }: WaitingCardPr
         <dl className="room-meta">
           <div>
             <dt>Warnamu</dt>
-            <dd>{myColor ? colorTitle(myColor) : '—'}</dd>
+            <dd>{colorTitle(myColor)}</dd>
           </div>
           <div>
             <dt>Waktu</dt>
@@ -260,62 +252,5 @@ function WaitingCard({ code, myColor, timeControl, opponentLeft }: WaitingCardPr
         </Link>
       </section>
     </Shell>
-  );
-}
-
-const noTargets = (): LegalTarget[] => [];
-const noop = () => {};
-
-type ConnectedViewProps = {
-  myName: string;
-  myColor: Color;
-  opponentName: string | null;
-  timeControl: TimeControl | null;
-};
-
-/** Fase 2: papan posisi awal, belum bisa digerakkan. Langkah online dibuat di Fase 3. */
-function ConnectedView({ myName, myColor, opponentName, timeControl }: ConnectedViewProps) {
-  const snapshot = useMemo(() => new GameEngine().snapshot(), []);
-  const theirColor = opposite(myColor);
-  const theirName = opponentName || colorTitle(theirColor);
-
-  return (
-    <div className="app">
-      <Header />
-      <main className="game">
-        <section className="game__board" aria-label="Permainan online">
-          <PlayerBar
-            name={theirName}
-            color={theirColor}
-            captured={[]}
-            advantage={0}
-            active={false}
-          />
-          <Board
-            pieces={snapshot.pieces}
-            orientation={myColor}
-            movable={null}
-            getTargets={noTargets}
-            onMove={noop}
-          />
-          <PlayerBar
-            name={myName ? `${myName} (kamu)` : 'Kamu'}
-            color={myColor}
-            captured={[]}
-            advantage={0}
-            active={false}
-          />
-        </section>
-        <aside className="game__side">
-          <p className="game__status" aria-live="polite">
-            Terhubung dengan {theirName}
-          </p>
-          <p className="muted">
-            Kamu bermain sebagai {COLOR_NAMES[myColor]} · {timeControlDescription(timeControl)}
-          </p>
-          <p className="muted">Langkah online segera hadir.</p>
-        </aside>
-      </main>
-    </div>
   );
 }

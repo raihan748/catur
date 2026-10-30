@@ -17,6 +17,19 @@ export const DEFAULT_TIME_CONTROL_ID = '10+0';
 
 export const findTimeControl = (id: string) => TIME_CONTROLS.find((o) => o.id === id);
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** Tampilan jam: "5:00", "1:02:03", dan persepuluhan detik di bawah 10 detik ("0:09.3"). */
+export function formatClock(ms: number): string {
+  if (ms <= 0) return '0:00.0';
+  if (ms < 10_000) return `0:${(Math.floor(ms / 100) / 10).toFixed(1).padStart(4, '0')}`;
+  const total = Math.ceil(ms / 1_000);
+  const h = Math.floor(total / 3_600);
+  const m = Math.floor((total % 3_600) / 60);
+  const s = total % 60;
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
 /** Mis. "10 menit per pemain" atau "3 menit + 2 detik per langkah". */
 export function timeControlDescription(tc: TimeControl | null): string {
   if (!tc) return 'Tanpa batas waktu';

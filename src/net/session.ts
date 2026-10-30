@@ -1,10 +1,9 @@
-import type { TimeControl } from '../game/timeControl.ts';
-import type { Color } from '../game/types.ts';
 import {
   createMessage,
   parseMessage,
   PROTOCOL_VERSION,
   type ControlType,
+  type GameMessage,
   type Message,
   type Payload,
   type SequencedType,
@@ -25,15 +24,13 @@ export type SessionErrorCode = TransportErrorCode | 'full' | 'version';
 
 export type Identity = { name: string; clientId: string };
 
-export type RoomSettings = { hostColor: Color; timeControl: TimeControl | null };
-
-export type StartInfo = Payload<'start'>;
-
 export type SessionHandlers = {
   onStatus?: (status: ConnectionStatus) => void;
   onPeer?: (peer: { name: string }) => void;
-  onStart?: (start: StartInfo) => void;
-  onMessage?: (message: Message) => void;
+  /** Sambungan terbentuk atau pulih (kedua sisi sudah bertukar hello). */
+  onConnect?: () => void;
+  /** Pesan permainan (bernomor), sudah lolos validasi dan bebas duplikat. */
+  onMessage?: (message: GameMessage) => void;
   onError?: (code: SessionErrorCode) => void;
 };
 
@@ -41,15 +38,15 @@ export const HEARTBEAT_MS = 5_000;
 export const PEER_TIMEOUT_MS = 15_000;
 export const HELLO_TIMEOUT_MS = 8_000;
 const REJECT_CLOSE_DELAY_MS = 500;
-const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 const toErrorCode = (err: unknown): SessionErrorCode =>
   err instanceof TransportError ? err.code : 'network';
 
 /**
- * Protokol di atas satu Channel: handshake hello/start, nomor urut + ack,
- * buang duplikat, dan heartbeat. Host hanya menerima satu tamu; setelah itu
- * hanya tamu yang sama (clientId sama) yang boleh tersambung ulang.
+ * Protokol di atas satu Channel: handshake hello, nomor urut + ack, buang
+ * duplikat, dan heartbeat. Host hanya menerima satu tamu; setelah itu hanya
+ * tamu yang sama (clientId sama) yang boleh tersambung ulang. Isi permainan
+ * diurus lapisan di atasnya (OnlineGame).
  */
 export class Session {
   readonly role: Role;
@@ -61,7 +58,6 @@ export class Session {
   private readonly sessionId = crypto.randomUUID();
 
   private channel: Channel | null = null;
-  private settings: RoomSettings | null = null;
   private guestClientId: string | null = null;
   private peerSessionId: string | null = null;
   private seq = 0;
@@ -85,8 +81,7 @@ export class Session {
     this.handlers = handlers;
   }
 
-  async host(code: string, settings: RoomSettings) {
-    this.settings = settings;
+  async host(code: string) {
     this.setStatus('creating');
     try {
       await this.transport.listen(code, (ch) => this.accept(ch));
@@ -104,7 +99,7 @@ export class Session {
       if (this.closed) return ch.close();
       this.attach(ch);
       this.sendControl('hello', this.helloPayload());
-      // Tamu dianggap terhubung setelah host membalas hello + start.
+      // Tamu dianggap terhubung setelah host membalas hello.
       this.helloTimer = setTimeout(() => this.fail('unreachable'), HELLO_TIMEOUT_MS);
     } catch (err) {
       this.fail(toErrorCode(err));
@@ -156,11 +151,7 @@ export class Session {
       this.attach(ch);
       this.greet(msg.d);
       this.sendControl('hello', this.helloPayload());
-      // Kirim ulang dulu pesan lama agar urutan nomor tetap naik di sisi penerima.
-      this.resendPending();
-      const { hostColor, timeControl } = this.settings!;
-      this.send('start', { hostColor, timeControl, fen: INITIAL_FEN });
-      this.setStatus('connected');
+      this.established();
     };
   }
 
@@ -181,7 +172,11 @@ export class Session {
         this.pending.delete(msg.d.n);
         return;
       case 'hello':
-        if (this.role === 'guest') this.greet(msg.d);
+        if (this.role === 'guest' && this.status !== 'connected') {
+          this.clearHelloTimer();
+          this.greet(msg.d);
+          this.established();
+        }
         return;
       case 'reject':
         this.fail(msg.d.reason);
@@ -191,16 +186,15 @@ export class Session {
     this.sendControl('ack', { n: msg.n });
     if (msg.n <= this.lastSeen) return; // duplikat
     this.lastSeen = msg.n;
-
-    if (msg.t === 'start') {
-      if (this.role !== 'guest') return;
-      this.clearHelloTimer();
-      this.handlers.onStart?.(msg.d);
-      this.resendPending();
-      this.setStatus('connected');
-      return;
-    }
     this.handlers.onMessage?.(msg);
+  }
+
+  /** Kedua sisi sudah bertukar hello. */
+  private established() {
+    // Kirim ulang dulu pesan lama agar nomor urut tetap naik di sisi penerima.
+    this.resendPending();
+    this.setStatus('connected');
+    this.handlers.onConnect?.();
   }
 
   private greet(hello: Payload<'hello'>) {

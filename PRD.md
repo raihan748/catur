@@ -101,17 +101,18 @@ Semua pesan JSON: `{ v:1, t:<tipe>, n:<nomor urut>, ts:<epoch ms>, d:<payload> }
 |---|---|---|
 | `hello` | keduanya | `{ name, clientId, sessionId, protocol }` |
 | `reject` | host→tamu | `{ reason: 'full' \| 'version' }` |
-| `start` | host→tamu | `{ hostColor, timeControl, fen }` |
-| `move` | keduanya | `{ from, to, promotion?, san, clockMs }` |
+| `sync` | host→tamu | `{ game, hostColor, timeControl, moves[], clocks, result }` — keadaan lengkap: permainan baru, rematch, sambung ulang, atau pemulihan |
+| `sync_request` | tamu→host | `{}` — tamu mendeteksi posisi tidak cocok |
+| `move` | keduanya | `{ game, ply, from, to, promotion?, san, clockMs }` |
 | `ack` | keduanya | `{ n }` |
-| `resign` / `draw_offer` / `draw_accept` / `draw_decline` | keduanya | `{}` |
-| `rematch_offer` / `rematch_accept` | keduanya | `{}` |
-| `sync` | keduanya | `{ fen, pgn, clocks, turn }` |
-| `chat` | keduanya | `{ text }` |
+| `resign` / `abort` / `draw_offer` / `draw_accept` / `draw_decline` | keduanya | `{ game }` |
+| `timeout` | keduanya | `{ game, color }` — diterima bila jam penerima juga ≤ 1,5 dtk |
+| `rematch_offer` / `rematch_accept` | keduanya | `{ game }` |
+| `chat` | keduanya | `{ text }` (Fase 5) |
 | `ping` / `pong` | keduanya | `{}` |
 
 Aturan: pesan tidak dikenal diabaikan; payload divalidasi skema (mis. Zod) sebelum diproses.
-Pesan kendali (`hello`, `reject`, `ack`, `ping`, `pong`) memakai `n = 0` dan tidak di-ack; pesan lain bernomor urut, di-ack, dan duplikat dibuang. `clientId` (per tab) mengenali tamu yang sama saat sambung ulang; `sessionId` (per muat halaman) mengatur ulang hitungan nomor urut.
+Pesan kendali (`hello`, `reject`, `ack`, `ping`, `pong`) memakai `n = 0` dan tidak di-ack; pesan lain bernomor urut, di-ack, dan duplikat dibuang. `clientId` (per tab) mengenali tamu yang sama saat sambung ulang; `sessionId` (per muat halaman) mengatur ulang hitungan nomor urut. Pesan permainan membawa `game` (nomor permainan, naik tiap rematch) sehingga sisa pesan permainan lama diabaikan. Host adalah sumber kebenaran bila posisi kedua sisi berbeda.
 
 ## 9. Risiko & Mitigasi
 
@@ -141,8 +142,6 @@ Pesan kendali (`hello`, `reject`, `ack`, `ping`, `pong`) memakai `n = 0` dan tid
 Sudah diputuskan:
 - Bahasa UI: **Bahasa Indonesia saja** (tanpa i18n/EN).
 - Domain: sudah dimiliki pengguna, akan dipasang di Vercel.
-
-Masih terbuka:
 - Tanpa TURN pada MVP.
 - Alur masuk: pilihan Host / Gabung dengan kode ruangan.
 

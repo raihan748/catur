@@ -1,0 +1,131 @@
+/* Jam catur */
+.clock {
+  min-width: 72px;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.clock--active {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  box-shadow: none;
+}
+
+.clock--low.clock--active {
+  background: var(--danger);
+}
+
+.clock--low {
+  color: var(--danger);
+}
+
+/* Banner di panel samping (tawaran remis, koneksi, hasil) */
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.banner p {
+  margin: 0;
+}
+
+.banner--warn {
+  border-left-color: var(--danger);
+}
+
+.banner--result {
+  align-items: flex-start;
+}
+
+.banner__title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.banner__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Konfirmasi menyerah */
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.confirm > span {
+  flex-basis: 100%;
+  font-weight: 600;
+}
+
+/* Dialog hasil permainan */
+.result-dialog {
+  width: min(360px, calc(100vw - 32px));
+  padding: var(--space-5);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.result-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.result-dialog__title {
+  margin: 0 0 var(--space-1);
+  font-size: 26px;
+}
+
+.result-dialog p {
+  margin: 0 0 var(--space-2);
+}
+
+.result-dialog__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+/* Pemberitahuan singkat */
+.toast {
+  position: fixed;
+  bottom: var(--space-5);
+  left: 50%;
+  z-index: 50;
+  max-width: calc(100vw - 32px);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+  box-shadow: var(--shadow-card);
+  transform: translateX(-50%);
+}

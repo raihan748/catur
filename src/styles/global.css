@@ -74,6 +74,12 @@ a {
   accent-color: var(--primary);
 }
 
+.btn--danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: #ffffff;
+}
+
 .btn--ghost {
   border-color: transparent;
   background: none;

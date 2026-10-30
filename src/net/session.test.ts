@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMessage } from './protocol.ts';
-import {
-  HEARTBEAT_MS,
-  PEER_TIMEOUT_MS,
-  Session,
-  type SessionErrorCode,
-  type StartInfo,
-} from './session.ts';
+import { createMessage, type GameMessage } from './protocol.ts';
+import { HEARTBEAT_MS, PEER_TIMEOUT_MS, Session, type SessionErrorCode } from './session.ts';
 import { TransportError, type Channel, type Transport } from './transport.ts';
 
 // --- Transport tiruan di memori (asinkron seperti DataChannel sungguhan) -----
@@ -84,13 +78,13 @@ const flush = async () => {
 };
 
 const CODE = 'K7M2QX';
-const SETTINGS = { hostColor: 'b' as const, timeControl: { initialMs: 300_000, incrementMs: 0 } };
 
 function makePlayer(hub: MemoryHub, role: 'host' | 'guest', name: string, clientId = name) {
   const log = {
     statuses: [] as string[],
     errors: [] as SessionErrorCode[],
-    starts: [] as StartInfo[],
+    connects: 0,
+    messages: [] as GameMessage[],
     peers: [] as string[],
   };
   const session = new Session(
@@ -100,7 +94,8 @@ function makePlayer(hub: MemoryHub, role: 'host' | 'guest', name: string, client
     {
       onStatus: (s) => log.statuses.push(s),
       onError: (e) => log.errors.push(e),
-      onStart: (s) => log.starts.push(s),
+      onConnect: () => log.connects++,
+      onMessage: (m) => log.messages.push(m),
       onPeer: (p) => log.peers.push(p.name),
     },
   );
@@ -110,7 +105,7 @@ function makePlayer(hub: MemoryHub, role: 'host' | 'guest', name: string, client
 async function connectedPair(hub = new MemoryHub()) {
   const host = makePlayer(hub, 'host', 'Ani');
   const guest = makePlayer(hub, 'guest', 'Budi');
-  await host.session.host(CODE, SETTINGS);
+  await host.session.host(CODE);
   await guest.session.join(CODE);
   await flush();
   return { hub, host, guest };
@@ -125,18 +120,19 @@ afterEach(() => {
 });
 
 describe('Session', () => {
-  it('menyelesaikan handshake hello + start', async () => {
+  it('menyelesaikan handshake hello dan meneruskan pesan permainan', async () => {
     const { host, guest } = await connectedPair();
 
     expect(host.log.statuses).toEqual(['creating', 'waiting', 'connected']);
     expect(guest.log.statuses).toEqual(['connecting', 'connected']);
     expect(host.log.peers).toEqual(['Budi']);
     expect(guest.log.peers).toEqual(['Ani']);
-    expect(guest.log.starts).toHaveLength(1);
-    expect(guest.log.starts[0]).toMatchObject({
-      hostColor: 'b',
-      timeControl: { initialMs: 300_000, incrementMs: 0 },
-    });
+    expect(host.log.connects).toBe(1);
+    expect(guest.log.connects).toBe(1);
+
+    host.session.send('resign', { game: 1 });
+    await flush();
+    expect(guest.log.messages.map((m) => m.t)).toEqual(['resign']);
   });
 
   it('melaporkan ruangan yang tidak ada', async () => {
@@ -176,25 +172,35 @@ describe('Session', () => {
   it('membuang pesan duplikat berdasarkan nomor urut', async () => {
     const { hub, guest } = await connectedPair();
     const hostSide = hub.hostSides[0]!;
-    const start = { hostColor: 'w' as const, timeControl: null, fen: 'x' };
 
-    hostSide.send(createMessage('start', 1, start)); // nomor 1 sudah diterima
+    hostSide.send(createMessage('draw_offer', 1, { game: 1 }));
+    hostSide.send(createMessage('draw_offer', 1, { game: 1 })); // nomor sama: duplikat
+    hostSide.send(createMessage('draw_offer', 2, { game: 1 }));
     await flush();
-    expect(guest.log.starts).toHaveLength(1);
+    expect(guest.log.messages.map((m) => m.n)).toEqual([1, 2]);
+  });
 
-    hostSide.send(createMessage('start', 2, start));
+  it('mengirim ulang pesan yang belum di-ack setelah sambungan pulih', async () => {
+    const { hub, host, guest } = await connectedPair();
+    hub.hostSides[0]!.muted = true;
+    host.session.send('draw_offer', { game: 1 }); // hilang di jalan
+    guest.session.close();
     await flush();
-    expect(guest.log.starts).toHaveLength(2);
+
+    const again = makePlayer(hub, 'guest', 'Budi', 'Budi');
+    await again.session.join(CODE);
+    await flush();
+    expect(again.log.messages.map((m) => m.t)).toEqual(['draw_offer']);
   });
 
   it('mengabaikan data rusak dari lawan', async () => {
     const { hub, guest } = await connectedPair();
     const hostSide = hub.hostSides[0]!;
     hostSide.send('bukan json protokol');
-    hostSide.send({ v: 1, t: 'start', n: 9, ts: 0, d: { hostColor: 'ungu' } });
+    hostSide.send({ v: 1, t: 'move', n: 9, ts: 0, d: { game: 1, from: 'z9', to: 'e4' } });
     await flush();
     expect(guest.session.status).toBe('connected');
-    expect(guest.log.starts).toHaveLength(1);
+    expect(guest.log.messages).toEqual([]);
   });
 
   it('mendeteksi lawan yang diam lewat heartbeat', async () => {

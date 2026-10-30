@@ -112,6 +112,26 @@ describe('GameEngine', () => {
     expect(engine.snapshot().result).toEqual({ reason: 'repetition' });
   });
 
+  it('membangun ulang permainan dari daftar langkah', () => {
+    const original = new GameEngine();
+    play(original, ['e2e4', 'e7e5', 'g1f3']);
+
+    const rebuilt = GameEngine.fromMoves(original.moveList());
+    expect(rebuilt?.snapshot().fen).toBe(original.snapshot().fen);
+    expect(rebuilt?.ply).toBe(3);
+    expect(GameEngine.fromMoves([{ from: 'e2', to: 'e5' }])).toBeNull();
+  });
+
+  it('menilai bahan skakmat untuk aturan waktu habis', () => {
+    expect(new GameEngine().hasMatingMaterial('w')).toBe(true);
+    expect(new GameEngine('k7/8/8/8/8/8/8/K7 w - - 0 1').hasMatingMaterial('w')).toBe(false);
+    // Raja + satu kuda melawan raja sendirian: tidak bisa skakmat.
+    expect(new GameEngine('k7/8/8/8/8/8/8/KN6 w - - 0 1').hasMatingMaterial('w')).toBe(false);
+    // Raja + kuda melawan raja + pion: skakmat masih mungkin.
+    expect(new GameEngine('k7/p7/8/8/8/8/8/KN6 w - - 0 1').hasMatingMaterial('w')).toBe(true);
+    expect(new GameEngine('k7/8/8/8/8/8/P7/K7 w - - 0 1').hasMatingMaterial('w')).toBe(true);
+  });
+
   it('mendeteksi aturan 50 langkah', () => {
     const engine = new GameEngine('8/8/8/8/8/8/k7/4K2R w - - 99 80');
     play(engine, ['h1h3']);

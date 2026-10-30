@@ -8,6 +8,7 @@ import type {
   MoveInput,
   MoveRecord,
   PieceSymbol,
+  PromotionPiece,
   Square,
 } from './types.ts';
 
@@ -33,8 +34,49 @@ export class GameEngine {
     this.chess = new Chess(fen);
   }
 
+  /** Bangun ulang permainan dari daftar langkah; null bila ada langkah ilegal. */
+  static fromMoves(moves: MoveInput[]): GameEngine | null {
+    const engine = new GameEngine();
+    for (const m of moves) {
+      if (!engine.tryMove(m)) return null;
+    }
+    return engine;
+  }
+
   get turn(): Color {
     return this.chess.turn();
+  }
+
+  /** Jumlah langkah (setengah langkah) yang sudah dimainkan. */
+  get ply(): number {
+    return this.chess.history().length;
+  }
+
+  moveList(): MoveInput[] {
+    return this.chess.history({ verbose: true }).map((m) => ({
+      from: m.from,
+      to: m.to,
+      ...(m.promotion && { promotion: m.promotion as PromotionPiece }),
+    }));
+  }
+
+  /**
+   * Apakah `color` masih mungkin men-skakmat. Dipakai saat lawan kehabisan waktu:
+   * menurut FIDE hasilnya remis bila pemenang tidak punya bidak untuk skakmat.
+   */
+  hasMatingMaterial(color: Color): boolean {
+    const own: PieceSymbol[] = [];
+    let theirs = 0;
+    for (const row of this.chess.board()) {
+      for (const cell of row) {
+        if (!cell || cell.type === 'k') continue;
+        if (cell.color === color) own.push(cell.type);
+        else theirs++;
+      }
+    }
+    if (own.length === 0) return false;
+    const loneMinor = own.length === 1 && (own[0] === 'n' || own[0] === 'b');
+    return !(loneMinor && theirs === 0);
   }
 
   /** Kotak tujuan legal dari `from`; kosong bila bukan giliran bidak itu atau permainan selesai. */
