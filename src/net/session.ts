@@ -3,9 +3,9 @@ import {
   parseMessage,
   PROTOCOL_VERSION,
   type ControlType,
-  type GameMessage,
   type Message,
   type Payload,
+  type PeerMessage,
   type SequencedType,
 } from './protocol.ts';
 import {
@@ -38,8 +38,8 @@ export type SessionHandlers = {
   onPeer?: (peer: { name: string; clientId: string }) => void;
   /** Sambungan terbentuk atau pulih (kedua sisi sudah bertukar hello). */
   onConnect?: () => void;
-  /** Pesan permainan (bernomor), sudah lolos validasi dan bebas duplikat. */
-  onMessage?: (message: GameMessage) => void;
+  /** Pesan bernomor (permainan & obrolan), sudah lolos validasi dan bebas duplikat. */
+  onMessage?: (message: PeerMessage) => void;
   /** Percobaan sambung ulang gagal karena galat sementara; akan dicoba lagi. */
   onRetry?: (code: SessionErrorCode) => void;
   /** Galat yang menghentikan sesi. */

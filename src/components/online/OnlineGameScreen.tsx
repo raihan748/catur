@@ -4,15 +4,21 @@ import { Link } from 'react-router';
 import { opposite } from '../../game/engine.ts';
 import { colorTitle, moveText, resultText } from '../../game/labels.ts';
 import type { OnlineGameView, RematchState } from '../../game/onlineGame.ts';
+import { buildPgn } from '../../game/pgn.ts';
 import type { Color, GameResult } from '../../game/types.ts';
 import type { ConnectionStatus, Role, SessionErrorCode } from '../../net/session.ts';
 import { useRoomStore } from '../../store/roomStore.ts';
 import { formatRoomCode } from '../../utils/roomCode.ts';
 import Board from '../board/Board.tsx';
 import Clock from '../Clock.tsx';
+import ExportMenu from '../ExportMenu.tsx';
 import Header from '../Header.tsx';
+import HistoryNav from '../HistoryNav.tsx';
 import MoveList from '../MoveList.tsx';
 import PlayerBar from '../PlayerBar.tsx';
+import { useGameSounds } from '../useGameSounds.ts';
+import { useHistoryView } from '../useHistoryView.ts';
+import ChatPanel from './ChatPanel.tsx';
 import '../game.css';
 import './online.css';
 
@@ -40,6 +46,10 @@ export default function OnlineGameScreen({
   const [flipped, setFlipped] = useState(false);
 
   const { snapshot, result, myColor } = view;
+  const history = useHistoryView(snapshot, view.game);
+  const shown = history.view;
+  useGameSounds(snapshot.moves, result, view.game);
+
   const theirColor = opposite(myColor);
   const theirName = opponentName || colorTitle(theirColor);
   const connected = connection === 'connected';
@@ -52,12 +62,23 @@ export default function OnlineGameScreen({
       ? `Giliranmu${check}`
       : `Giliran ${theirName}${check}`;
 
+  const getPgn = () => {
+    const nameOf = (c: Color) => (c === myColor ? myName || colorTitle(c) : theirName);
+    return buildPgn({
+      moves: snapshot.moves,
+      white: nameOf('w'),
+      black: nameOf('b'),
+      result,
+      timeControl: view.timeControl,
+    });
+  };
+
   const bar = (color: Color) => (
     <PlayerBar
       name={color === myColor ? (myName ? `${myName} (kamu)` : 'Kamu') : theirName}
       color={color}
-      captured={snapshot.captured[color]}
-      advantage={snapshot.material[color] - snapshot.material[opposite(color)]}
+      captured={shown.captured[color]}
+      advantage={shown.material[color] - shown.material[opposite(color)]}
       active={!result && snapshot.turn === color}
     >
       {view.clocks && (
@@ -78,11 +99,11 @@ export default function OnlineGameScreen({
         <section className="game__board" aria-label="Permainan online">
           {bar(opposite(orientation))}
           <Board
-            pieces={snapshot.pieces}
+            pieces={shown.pieces}
             orientation={orientation}
-            movable={view.canPlay ? myColor : null}
-            lastMove={snapshot.lastMove}
-            checkSquare={snapshot.checkSquare}
+            movable={history.live && view.canPlay ? myColor : null}
+            lastMove={shown.lastMove}
+            checkSquare={shown.checkSquare}
             getTargets={legalTargets}
             onMove={move}
           />
@@ -121,7 +142,8 @@ export default function OnlineGameScreen({
             </div>
           )}
 
-          <MoveList moves={snapshot.moves} />
+          <MoveList moves={snapshot.moves} current={history.ply} onSelect={history.show} />
+          <HistoryNav ply={history.ply} total={history.total} onShow={history.show} />
 
           <div className="game__actions">
             {!result && <GameActions view={view} connected={connected} />}
@@ -129,6 +151,8 @@ export default function OnlineGameScreen({
               Putar papan
             </button>
           </div>
+          <ExportMenu getPgn={getPgn} fen={shown.fen} />
+          <ChatPanel opponentName={theirName} />
         </aside>
       </main>
 

@@ -1,4 +1,5 @@
 import type { Color } from '../game/types.ts';
+import { cleanChatText } from '../net/chat.ts';
 import type { Role } from '../net/session.ts';
 import { readStorage, removeStorage, storageKeys, writeStorage } from '../utils/storage.ts';
 
@@ -13,6 +14,8 @@ const MAX_AGE_MS = 24 * 60 * 60_000;
 /** Lama menunggu kunci: cukup untuk tab yang sedang dimuat ulang melepasnya. */
 const LOCK_WAIT_MS = 1_000;
 
+export type ChatMessage = { from: 'me' | 'them'; text: string };
+
 export type SavedRoom = {
   code: string;
   role: Role;
@@ -25,10 +28,22 @@ export type SavedRoom = {
   opponentName: string | null;
   /** Keadaan permainan (bentuk isi `sync`); null = belum mulai. */
   game: unknown;
+  /** Obrolan terakhir di ruangan ini. */
+  chat: ChatMessage[];
   savedAt: number;
 };
 
 const keyOf = (code: string, role: Role) => `${PREFIX}${code}:${role}`;
+
+function parseChat(raw: unknown): ChatMessage[] {
+  if (!Array.isArray(raw)) return [];
+  const chat: ChatMessage[] = [];
+  for (const m of raw as Partial<ChatMessage>[]) {
+    const text = typeof m?.text === 'string' ? cleanChatText(m.text) : '';
+    if (text && (m.from === 'me' || m.from === 'them')) chat.push({ from: m.from, text });
+  }
+  return chat;
+}
 
 function parse(raw: string | null): SavedRoom | null {
   if (!raw) return null;
@@ -50,6 +65,7 @@ function parse(raw: string | null): SavedRoom | null {
       guestClientId: typeof r.guestClientId === 'string' ? r.guestClientId : null,
       opponentName: typeof r.opponentName === 'string' ? r.opponentName : null,
       game: r.game ?? null,
+      chat: parseChat(r.chat),
       savedAt: r.savedAt,
     };
   } catch {

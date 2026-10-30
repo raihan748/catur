@@ -26,6 +26,16 @@ const toRecord = (m: Move): MoveRecord => ({
   ...(m.promotion && { promotion: m.promotion }),
 });
 
+/** Posisi setelah `ply` langkah pertama (untuk melihat riwayat). */
+export function positionAt(moves: readonly MoveRecord[], ply: number): GameSnapshot {
+  const engine = new GameEngine();
+  for (const m of moves.slice(0, ply)) {
+    const promotion = m.promotion as PromotionPiece | undefined;
+    engine.tryMove({ from: m.from, to: m.to, ...(promotion && { promotion }) });
+  }
+  return engine.snapshot();
+}
+
 /** Pembungkus chess.js: satu-satunya tempat aturan catur dijalankan. */
 export class GameEngine {
   private chess: Chess;

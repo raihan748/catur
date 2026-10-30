@@ -79,13 +79,16 @@ Acuan: [PRD.md](PRD.md) dan [design.md](design.md). Estimasi untuk 1 developer, 
 **Selesai bila**: refresh/putus sementara tidak menghilangkan permainan.
 
 ## Fase 5 — Poles & Fitur Tambahan (3 hk)
-- [ ] Chat (200 karakter, di-escape) + badge belum dibaca
-- [ ] Suara (langkah/tangkap/skak/selesai) + tombol bisu
-- [ ] Ekspor PGN, salin FEN, navigasi riwayat ◀▶
-- [ ] Aksesibilitas: keyboard, ARIA, `aria-live`, reduced motion
-- [ ] Responsif (320 px → desktop), uji iOS Safari & Android Chrome
-- [ ] PWA (manifest, ikon, service worker via `vite-plugin-pwa`)
-- [ ] Semua teks UI Bahasa Indonesia (`<html lang="id">`), tanpa i18n
+- [x] Chat (200 karakter, dibersihkan, selalu tampil sebagai teks) + badge belum dibaca; tersimpan bersama permainan
+- [x] Suara (langkah/tangkap/skak/selesai/pesan) disintesis Web Audio, tanpa file + tombol bisu (tersimpan)
+- [x] Ekspor PGN (salin/unduh), salin FEN posisi yang dilihat, navigasi riwayat « ‹ › » (tombol, klik langkah, ←/→/Home/End)
+- [x] Animasi gerak bidak 150 ms (dipindah dari Fase 1); dilewati untuk bidak yang diseret & `prefers-reduced-motion`
+- [x] Aksesibilitas: label & `aria-live` untuk obrolan, riwayat, ekspor; fokus tidak hilang di ujung riwayat
+- [x] Responsif 320 px → desktop tanpa scroll horizontal (diuji di browser)
+- [ ] Uji iOS Safari & Android Chrome di perangkat nyata
+- [x] PWA: manifest, ikon PNG (digambar dari bidak kuda proyek), service worker buatan sendiri lewat plugin Vite kecil (`scripts/service-worker.js`) alih-alih `vite-plugin-pwa`; cangkang offline diuji
+- [x] Semua teks UI Bahasa Indonesia (`<html lang="id">`), tanpa i18n
+- [ ] Lighthouse (belum dijalankan)
 
 **Selesai bila**: Lighthouse Performance & Accessibility ≥ 90; checklist QA di design.md §10 lulus.
 

@@ -5,7 +5,11 @@
 }
 
 .topbar {
-  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 
@@ -14,6 +18,24 @@
   font-size: 18px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.topbar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.topbar__btn:hover {
+  color: var(--text);
 }
 
 /* Tata letak permainan: satu kolom di HP, dua kolom ≥ 960px. */
@@ -152,6 +174,7 @@
 
 /* Daftar langkah: strip horizontal di HP, kolom di desktop. */
 .moves {
+  position: relative; /* acuan offsetTop/offsetLeft saat menggulir ke langkah */
   display: flex;
   gap: var(--space-3);
   margin: 0;
@@ -172,7 +195,8 @@
 
 .moves__pair {
   display: flex;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .moves__num {
@@ -180,12 +204,67 @@
 }
 
 .moves__san {
-  padding: 0 4px;
+  min-width: 24px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 0;
   border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.moves__san--last {
+.moves__san:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.moves__san--current,
+.moves__san--current:hover {
   background: var(--hl-last);
+}
+
+/* Navigasi riwayat */
+.history {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.history__btn {
+  min-width: 44px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.history__btn[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.history__pos {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* Ekspor PGN/FEN */
+.export__summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.export__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 @media (min-width: 960px) {
@@ -200,7 +279,7 @@
   .moves__pair {
     display: grid;
     grid-template-columns: 4ch 1fr 1fr;
-    padding: 3px var(--space-2);
+    padding: 1px var(--space-2);
   }
 
   .moves__pair:nth-child(odd) {

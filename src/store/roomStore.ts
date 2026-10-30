@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { OnlineGame, type OnlineGameView } from '../game/onlineGame.ts';
 import { findTimeControl } from '../game/timeControl.ts';
 import type { Color, LegalTarget, MoveInput, Square } from '../game/types.ts';
+import { cleanChatText } from '../net/chat.ts';
 import { loadName } from '../net/identity.ts';
 import { PeerJsTransport } from '../net/peerjs.ts';
 import { parseGameState } from '../net/protocol.ts';
@@ -11,7 +12,15 @@ import {
   type Role,
   type SessionErrorCode,
 } from '../net/session.ts';
-import { claimRoom, loadRoom, removeRoom, saveRoom, type RoomClaim } from './savedRooms.ts';
+import { playSound } from '../utils/sound.ts';
+import {
+  claimRoom,
+  loadRoom,
+  removeRoom,
+  saveRoom,
+  type ChatMessage,
+  type RoomClaim,
+} from './savedRooms.ts';
 
 /** State router yang dibawa beranda → /r/:kode saat pengguna memilih Jadi Host. */
 export type HostRouteState = { role: 'host'; color: Color; timeControlId: string };
@@ -50,6 +59,9 @@ type RoomState = {
   opponentName: string | null;
   /** Keadaan permainan untuk UI; null sebelum masuk ruangan. */
   game: OnlineGameView | null;
+  chat: ChatMessage[];
+  /** Pesan lawan yang belum dibaca (panel obrolan tertutup). */
+  unreadChat: number;
 
   enter: (params: EnterParams) => void;
   /** Tombol "Coba lagi" (setelah galat) atau "Coba sekarang" (saat menyambung ulang). */
@@ -73,11 +85,16 @@ type RoomState = {
   offerRematch: () => void;
   acceptRematch: () => void;
   claimAbandon: () => void;
+  sendChat: (text: string) => void;
+  /** Panel obrolan terbuka: semua pesan dianggap sudah dibaca. */
+  readChat: () => void;
 };
 
 const CODE_TAKEN_RETRIES = 5;
 const CODE_TAKEN_RETRY_MS = 2_000;
 const CLOCK_TICK_MS = 250;
+/** Pesan obrolan yang disimpan di memori dan di browser. */
+const CHAT_HISTORY = 100;
 
 const INITIAL = {
   code: null,
@@ -88,6 +105,8 @@ const INITIAL = {
   myName: '',
   opponentName: null,
   game: null,
+  chat: [] as ChatMessage[],
+  unreadChat: 0,
 } satisfies Partial<RoomState>;
 
 export const useRoomStore = create<RoomState>((set, get) => {
@@ -124,8 +143,18 @@ export const useRoomStore = create<RoomState>((set, get) => {
       guestClientId,
       opponentName: get().opponentName,
       game: game?.state() ?? null,
+      chat: get().chat,
       savedAt: Date.now(),
     });
+  };
+
+  const addChat = (message: ChatMessage) => {
+    set((s) => ({
+      chat: [...s.chat, message].slice(-CHAT_HISTORY),
+      unreadChat: message.from === 'them' ? s.unreadChat + 1 : s.unreadChat,
+    }));
+    persist();
+    if (message.from === 'them') playSound('chat');
   };
 
   /** Ada lawan dan permainan belum selesai: simpanan dipertahankan saat keluar ruangan. */
@@ -148,7 +177,12 @@ export const useRoomStore = create<RoomState>((set, get) => {
           set(status === 'connected' ? { status, retryReason: null } : { status });
           g.setConnected(status === 'connected');
         },
-        onMessage: (msg) => session === s && g.receive(msg),
+        onMessage: (msg) => {
+          if (session !== s) return;
+          if (msg.t !== 'chat') return g.receive(msg);
+          const text = cleanChatText(msg.d.text);
+          if (text) addChat({ from: 'them', text });
+        },
         onPeer: (peer) => {
           if (session !== s) return;
           if (role === 'host') guestClientId = peer.clientId;
@@ -189,6 +223,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
       role: c.role,
       myName: saved?.myName ?? loadName(),
       opponentName: saved?.opponentName ?? null,
+      chat: saved?.chat ?? [],
     });
 
     const g: OnlineGame = new OnlineGame({
@@ -285,5 +320,16 @@ export const useRoomStore = create<RoomState>((set, get) => {
     offerRematch: () => game?.offerRematch(),
     acceptRematch: () => game?.acceptRematch(),
     claimAbandon: () => game?.claimAbandon(),
+
+    sendChat: (raw) => {
+      const text = cleanChatText(raw);
+      if (!text || !session) return;
+      // Terkirim begitu tersambung bila sedang terputus (antrean Session).
+      session.send('chat', { text });
+      addChat({ from: 'me', text });
+    },
+    readChat: () => {
+      if (get().unreadChat) set({ unreadChat: 0 });
+    },
   };
 });

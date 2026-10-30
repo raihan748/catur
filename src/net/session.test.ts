@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMessage, type GameMessage } from './protocol.ts';
+import { createMessage, type PeerMessage } from './protocol.ts';
 import {
   HEARTBEAT_MS,
   PEER_TIMEOUT_MS,
@@ -99,7 +99,7 @@ function makePlayer(
     errors: [] as SessionErrorCode[],
     retries: [] as SessionErrorCode[],
     connects: 0,
-    messages: [] as GameMessage[],
+    messages: [] as PeerMessage[],
     peers: [] as string[],
   };
   const session = new Session(

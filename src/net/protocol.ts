@@ -1,5 +1,6 @@
 import { SQUARES, type Square } from 'chess.js';
 import { z } from 'zod';
+import { MAX_CHAT_LENGTH } from './chat.ts';
 import { MAX_NAME_LENGTH } from './identity.ts';
 
 export { MAX_NAME_LENGTH };
@@ -98,6 +99,9 @@ const payloads = {
   draw_decline: gameOnly,
   rematch_offer: gameOnly,
   rematch_accept: gameOnly,
+
+  // Obrolan; tidak terikat nomor permainan.
+  chat: z.object({ text: z.string().min(1).max(MAX_CHAT_LENGTH) }),
 };
 
 const envelope = <T extends keyof typeof payloads>(t: T) =>
@@ -127,6 +131,7 @@ export const messageSchema = z.discriminatedUnion('t', [
   envelope('draw_decline'),
   envelope('rematch_offer'),
   envelope('rematch_accept'),
+  envelope('chat'),
 ]);
 
 export type Message = z.infer<typeof messageSchema>;
@@ -137,7 +142,10 @@ export type Payload<T extends MessageType> = Extract<Message, { t: T }>['d'];
 export const CONTROL_TYPES = ['hello', 'reject', 'ack', 'ping', 'pong'] as const;
 export type ControlType = (typeof CONTROL_TYPES)[number];
 export type SequencedType = Exclude<MessageType, ControlType>;
-export type GameMessage = Extract<Message, { t: SequencedType }>;
+/** Pesan bernomor yang diteruskan Session ke aplikasi. */
+export type PeerMessage = Extract<Message, { t: SequencedType }>;
+/** Pesan untuk OnlineGame (semua pesan bernomor kecuali obrolan). */
+export type GameMessage = Exclude<PeerMessage, { t: 'chat' }>;
 
 export function parseMessage(raw: unknown): Message | null {
   const parsed = messageSchema.safeParse(raw);

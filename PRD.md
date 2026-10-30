@@ -109,7 +109,7 @@ Semua pesan JSON: `{ v:1, t:<tipe>, n:<nomor urut>, ts:<epoch ms>, d:<payload> }
 | `timeout` | keduanya | `{ game, color }` — diterima bila jam penerima juga ≤ 1,5 dtk |
 | `abandon` | keduanya | `{ game }` — pengirim menang karena lawan terputus ≥ 60 dtk |
 | `rematch_offer` / `rematch_accept` | keduanya | `{ game }` |
-| `chat` | keduanya | `{ text }` (Fase 5) |
+| `chat` | keduanya | `{ text }` — 1–200 karakter, tidak terikat nomor permainan |
 | `ping` / `pong` | keduanya | `{}` |
 
 Aturan: pesan tidak dikenal diabaikan; payload divalidasi skema (mis. Zod) sebelum diproses.

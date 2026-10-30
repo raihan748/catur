@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent, PointerEvent } from 'react';
 import { squareLabel } from '../../game/labels.ts';
 import type {
@@ -10,7 +10,13 @@ import type {
   Square,
 } from '../../game/types.ts';
 import Piece from '../Piece.tsx';
-import { displaySquares, isLightSquare, squareFromPoint, stepSquare } from './geometry.ts';
+import {
+  displaySquares,
+  gridFromSquare,
+  isLightSquare,
+  squareFromPoint,
+  stepSquare,
+} from './geometry.ts';
 import PromotionPicker from './PromotionPicker.tsx';
 import './board.css';
 
@@ -38,6 +44,7 @@ type DragState = {
 };
 
 const DRAG_THRESHOLD_PX = 4;
+const MOVE_ANIMATION_MS = 150;
 
 const ARROW_STEPS: Record<string, [number, number]> = {
   ArrowUp: [-1, 0],
@@ -68,6 +75,41 @@ export default function Board({
   );
   const [dragFrom, setDragFrom] = useState<Square | null>(null);
   const [cursor, setCursor] = useState<Square>('e2');
+
+  const prevPieces = useRef(pieces);
+  /** Kotak tempat pengguna baru saja menjatuhkan bidak: sudah di tempat, tanpa animasi. */
+  const droppedOn = useRef<Square | null>(null);
+
+  // Bidak yang baru melangkah meluncur dari kotak asalnya.
+  useLayoutEffect(() => {
+    const before = prevPieces.current;
+    if (before === pieces) return;
+    prevPieces.current = pieces;
+    const dropped = droppedOn.current;
+    droppedOn.current = null;
+
+    if (!lastMove || dropped === lastMove.to) return;
+    // Hanya langkah yang baru terjadi (bidak meninggalkan kotak asal), bukan lompatan riwayat.
+    if (!before[lastMove.from] || pieces[lastMove.from]) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const el = boardRef.current?.querySelector<SVGElement>(
+      `[data-square="${lastMove.to}"] .sq__piece`,
+    );
+    if (!el?.animate) return;
+
+    const from = gridFromSquare(lastMove.from, orientation);
+    const to = gridFromSquare(lastMove.to, orientation);
+    // Persen pada translate mengacu ke ukuran bidak itu sendiri = satu kotak.
+    const offset = `translate(${(from.col - to.col) * 100}%, ${(from.row - to.row) * 100}%)`;
+    el.style.zIndex = '5'; // di atas bidak lain yang dilewati
+    const animation = el.animate([{ transform: offset }, { transform: 'none' }], {
+      duration: MOVE_ANIMATION_MS,
+      easing: 'ease-out',
+    });
+    const done = () => el.style.removeProperty('z-index');
+    animation.onfinish = done;
+    animation.oncancel = done;
+  }, [pieces, lastMove, orientation]);
 
   const selected = movable && selection?.pieces === pieces ? selection.square : null;
   const pendingPromotion = movable && promotion?.pieces === pieces ? promotion : null;
@@ -178,7 +220,10 @@ export default function Board({
     if (!drop) return;
     // Dilepas di luar papan atau di kotak ilegal: bidak kembali, tetap terpilih.
     const square = pointToSquare(e);
-    if (square && square !== d.from && attempt(d.from, square)) setCursor(square);
+    if (square && square !== d.from && attempt(d.from, square)) {
+      droppedOn.current = square;
+      setCursor(square);
+    }
   };
 
   const focusSquare = (square: Square) => {

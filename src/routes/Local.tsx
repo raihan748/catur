@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
 import Board from '../components/board/Board.tsx';
+import ExportMenu from '../components/ExportMenu.tsx';
 import Header from '../components/Header.tsx';
+import HistoryNav from '../components/HistoryNav.tsx';
 import MoveList from '../components/MoveList.tsx';
 import PlayerBar from '../components/PlayerBar.tsx';
+import { useGameSounds } from '../components/useGameSounds.ts';
+import { useHistoryView } from '../components/useHistoryView.ts';
 import '../components/game.css';
 import { opposite } from '../game/engine.ts';
 import { colorTitle, moveText, resultText, turnText } from '../game/labels.ts';
+import { buildPgn } from '../game/pgn.ts';
 import type { Color } from '../game/types.ts';
 import { useGameStore } from '../store/gameStore.ts';
 
@@ -18,26 +23,36 @@ export default function Local() {
 
   const [flipped, setFlipped] = useState(false);
   const [autoFlip, setAutoFlip] = useState(false);
+  /** Naik tiap mulai ulang: riwayat yang sedang dilihat kembali ke posisi terkini. */
+  const [round, setRound] = useState(0);
 
   useEffect(() => reset(), [reset]);
 
+  const history = useHistoryView(snapshot, round);
+  const shown = history.view;
+  useGameSounds(snapshot.moves, snapshot.result, round);
+
   const { result, turn } = snapshot;
   const orientation: Color = autoFlip ? turn : flipped ? 'b' : 'w';
-  const advantage = (color: Color) => snapshot.material[color] - snapshot.material[opposite(color)];
+  const advantage = (color: Color) => shown.material[color] - shown.material[opposite(color)];
   const status = result ? resultText(result) : turnText(turn, !!snapshot.checkSquare);
   const lastMove = snapshot.moves.at(-1);
 
   const restart = () => {
     if (result || snapshot.moves.length === 0 || window.confirm('Mulai ulang permainan ini?')) {
       reset();
+      setRound((r) => r + 1);
     }
   };
+
+  const getPgn = () =>
+    buildPgn({ moves: snapshot.moves, white: colorTitle('w'), black: colorTitle('b'), result });
 
   const bar = (color: Color) => (
     <PlayerBar
       name={colorTitle(color)}
       color={color}
-      captured={snapshot.captured[color]}
+      captured={shown.captured[color]}
       advantage={advantage(color)}
       active={!result && turn === color}
     />
@@ -50,11 +65,11 @@ export default function Local() {
         <section className="game__board" aria-label="Permainan lokal">
           {bar(opposite(orientation))}
           <Board
-            pieces={snapshot.pieces}
+            pieces={shown.pieces}
             orientation={orientation}
-            movable={result ? null : turn}
-            lastMove={snapshot.lastMove}
-            checkSquare={snapshot.checkSquare}
+            movable={result || !history.live ? null : turn}
+            lastMove={shown.lastMove}
+            checkSquare={shown.checkSquare}
             getTargets={legalTargets}
             onMove={move}
           />
@@ -67,7 +82,8 @@ export default function Local() {
             {lastMove ? moveText(lastMove) : ''}
             {result ? `. ${status}` : ''}
           </p>
-          <MoveList moves={snapshot.moves} />
+          <MoveList moves={snapshot.moves} current={history.ply} onSelect={history.show} />
+          <HistoryNav ply={history.ply} total={history.total} onShow={history.show} />
           <div className="game__actions">
             <button
               type="button"
@@ -89,6 +105,7 @@ export default function Local() {
               Putar otomatis tiap giliran
             </label>
           </div>
+          <ExportMenu getPgn={getPgn} fen={shown.fen} />
         </aside>
       </main>
     </div>
