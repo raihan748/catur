@@ -99,7 +99,8 @@ Semua pesan JSON: `{ v:1, t:<tipe>, n:<nomor urut>, ts:<epoch ms>, d:<payload> }
 
 | Tipe | Arah | Payload |
 |---|---|---|
-| `hello` | keduanya | `{ name, protocol }` |
+| `hello` | keduanya | `{ name, clientId, sessionId, protocol }` |
+| `reject` | host→tamu | `{ reason: 'full' \| 'version' }` |
 | `start` | host→tamu | `{ hostColor, timeControl, fen }` |
 | `move` | keduanya | `{ from, to, promotion?, san, clockMs }` |
 | `ack` | keduanya | `{ n }` |
@@ -110,6 +111,7 @@ Semua pesan JSON: `{ v:1, t:<tipe>, n:<nomor urut>, ts:<epoch ms>, d:<payload> }
 | `ping` / `pong` | keduanya | `{}` |
 
 Aturan: pesan tidak dikenal diabaikan; payload divalidasi skema (mis. Zod) sebelum diproses.
+Pesan kendali (`hello`, `reject`, `ack`, `ping`, `pong`) memakai `n = 0` dan tidak di-ack; pesan lain bernomor urut, di-ack, dan duplikat dibuang. `clientId` (per tab) mengenali tamu yang sama saat sambung ulang; `sessionId` (per muat halaman) mengatur ulang hitungan nomor urut.
 
 ## 9. Risiko & Mitigasi
 

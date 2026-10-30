@@ -39,16 +39,17 @@ Acuan: [PRD.md](PRD.md) dan [design.md](design.md). Estimasi untuk 1 developer, 
 **Selesai bila**: dua orang bisa menamatkan satu permainan di satu perangkat tanpa bug aturan.
 
 ## Fase 2 — Koneksi P2P (3 hk)
-- [ ] `net/transport.ts` (antarmuka) + `PeerJsTransport`
-- [ ] `utils/roomId.ts` (6 karakter, alfabet tanpa ambigu, prefix proyek)
-- [ ] Beranda: dua pilihan **Jadi Host** / **Gabung Ruangan**
-- [ ] Alur host: pengaturan (warna, waktu) → buat kode → layar tunggu (kode besar, salin, Web Share)
-- [ ] Alur tamu: input kode di menu Gabung (atau buka `/r/:kode`) → connect; kode salah → pesan galat
-- [ ] Tolak koneksi ketiga ("Ruangan penuh")
-- [ ] `net/protocol.ts`: skema Zod, nomor urut, `ack`, dedup
-- [ ] Heartbeat ping/pong, deteksi putus (15 dtk)
-- [ ] Handshake `hello` + `start` (warna, kontrol waktu, FEN awal)
-- [ ] Konfigurasi ICE (hanya STUN, tanpa TURN)
+- [x] `net/transport.ts` (antarmuka) + `net/peerjs.ts` (`PeerJsTransport`)
+- [x] `utils/roomCode.ts` (6 karakter, alfabet tanpa ambigu); prefix ID `catur-v1-`
+- [x] Beranda: dua pilihan **Jadi Host** / **Gabung Ruangan**
+- [x] Alur host: pengaturan (warna, waktu) → buat kode → layar tunggu (kode besar, salin, Web Share)
+- [x] Alur tamu: input kode di menu Gabung (atau buka `/r/:kode`) → connect; kode salah → pesan galat
+- [x] Tolak koneksi ketiga ("Ruangan penuh"); tamu yang sama (clientId) boleh sambung ulang
+- [x] `net/protocol.ts`: skema Zod; `net/session.ts`: nomor urut, `ack`, dedup
+- [x] Heartbeat ping/pong, deteksi putus (15 dtk)
+- [x] Handshake `hello` + `start` (warna, kontrol waktu, FEN awal)
+- [x] Konfigurasi ICE (hanya STUN, tanpa TURN)
+- [x] Code-splitting rute permainan agar beranda < 150 KB gzip
 
 **Selesai bila**: dua tab/dua perangkat berbeda jaringan terhubung dan bertukar `hello`.
 

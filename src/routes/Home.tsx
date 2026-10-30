@@ -1,19 +1,214 @@
-import { Link } from 'react-router';
+import { useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import '../components/home.css';
+import {
+  DEFAULT_TIME_CONTROL_ID,
+  findTimeControl,
+  TIME_CONTROLS,
+  timeControlDescription,
+} from '../game/timeControl.ts';
+import type { Color } from '../game/types.ts';
+import { loadName, MAX_NAME_LENGTH, saveName } from '../net/identity.ts';
+import type { HostRouteState } from '../store/roomStore.ts';
+import {
+  generateRoomCode,
+  isValidRoomCode,
+  normalizeRoomCode,
+  ROOM_CODE_LENGTH,
+} from '../utils/roomCode.ts';
 
-// Placeholder Fase 0 — pilihan Jadi Host / Gabung Ruangan dibuat di Fase 2.
+type Mode = 'host' | 'gabung';
+
 export default function Home() {
+  const [params, setParams] = useSearchParams();
+  const mode = params.get('mode');
+  const choose = (next: Mode | null) => setParams(next ? { mode: next } : {});
+
   return (
-    <main className="page">
-      <h1>♞ C.A.T.U.R</h1>
-      <p>Main catur langsung dengan temanmu. Tanpa akun.</p>
-      <p>
-        <Link to="/lokal" className="btn btn--primary">
-          Main berdua di satu perangkat
-        </Link>
-      </p>
-      <p>
-        <Link to="/tentang">Cara kerja</Link>
-      </p>
-    </main>
+    <div className="app">
+      <main className="home">
+        <h1 className="home__brand">♞ C.A.T.U.R</h1>
+        <p className="home__tagline">Main catur langsung dengan temanmu. Tanpa akun.</p>
+
+        {mode === 'host' ? (
+          <HostForm onBack={() => choose(null)} />
+        ) : mode === 'gabung' ? (
+          <JoinForm onBack={() => choose(null)} />
+        ) : (
+          <div className="choices">
+            <button type="button" className="choice" onClick={() => choose('host')}>
+              <span className="choice__title">Jadi Host</span>
+              <span className="choice__desc">Buat ruangan dan dapatkan kode untuk lawanmu.</span>
+            </button>
+            <button type="button" className="choice" onClick={() => choose('gabung')}>
+              <span className="choice__title">Gabung Ruangan</span>
+              <span className="choice__desc">Punya kode dari temanmu? Masukkan di sini.</span>
+            </button>
+          </div>
+        )}
+
+        <nav className="home__links" aria-label="Lainnya">
+          <Link to="/lokal">Main berdua di satu perangkat</Link>
+          <Link to="/tentang">Cara kerja</Link>
+        </nav>
+      </main>
+    </div>
+  );
+}
+
+function NameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="field">
+      <label htmlFor="player-name">Nama panggilan (opsional)</label>
+      <input
+        id="player-name"
+        className="input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        maxLength={MAX_NAME_LENGTH}
+        autoComplete="nickname"
+      />
+    </div>
+  );
+}
+
+const COLOR_CHOICES: { value: Color | 'random'; label: string }[] = [
+  { value: 'w', label: 'Putih' },
+  { value: 'b', label: 'Hitam' },
+  { value: 'random', label: 'Acak' },
+];
+
+function HostForm({ onBack }: { onBack: () => void }) {
+  const navigate = useNavigate();
+  const [name, setName] = useState(loadName);
+  const [color, setColor] = useState<Color | 'random'>('random');
+  const [timeControlId, setTimeControlId] = useState(DEFAULT_TIME_CONTROL_ID);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    saveName(name);
+    const state: HostRouteState = {
+      role: 'host',
+      color: color === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : color,
+      timeControlId,
+    };
+    navigate(`/r/${generateRoomCode()}`, { state });
+  };
+
+  return (
+    <form className="card" onSubmit={submit}>
+      <h2 className="card__title">Jadi Host</h2>
+      <NameField value={name} onChange={setName} />
+
+      <fieldset className="field">
+        <legend>Warna bidakmu</legend>
+        <div className="segmented">
+          {COLOR_CHOICES.map((c) => (
+            <label key={c.value} className="segmented__item">
+              <input
+                type="radio"
+                name="color"
+                value={c.value}
+                checked={color === c.value}
+                onChange={() => setColor(c.value)}
+              />
+              <span>{c.label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="field">
+        <legend>Kontrol waktu</legend>
+        <div className="segmented segmented--wrap">
+          {TIME_CONTROLS.map((tc) => (
+            <label key={tc.id} className="segmented__item">
+              <input
+                type="radio"
+                name="time-control"
+                value={tc.id}
+                checked={timeControlId === tc.id}
+                onChange={() => setTimeControlId(tc.id)}
+              />
+              <span>{tc.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="field__hint">
+          {timeControlDescription(findTimeControl(timeControlId)?.value ?? null)}
+        </p>
+      </fieldset>
+
+      <div className="form-actions">
+        <button type="button" className="btn" onClick={onBack}>
+          Kembali
+        </button>
+        <button type="submit" className="btn btn--primary">
+          Buat Ruangan
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function JoinForm({ onBack }: { onBack: () => void }) {
+  const navigate = useNavigate();
+  const [code, setCode] = useState('');
+  const [name, setName] = useState(loadName);
+  const [error, setError] = useState('');
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!isValidRoomCode(code)) {
+      setError(
+        `Kode ruangan terdiri dari ${ROOM_CODE_LENGTH} huruf dan angka, tanpa O, I, 0, atau 1.`,
+      );
+      return;
+    }
+    saveName(name);
+    navigate(`/r/${code}`);
+  };
+
+  return (
+    <form className="card" onSubmit={submit} noValidate>
+      <h2 className="card__title">Gabung Ruangan</h2>
+      <div className="field">
+        <label htmlFor="room-code">Kode ruangan</label>
+        <input
+          id="room-code"
+          className="input input--code"
+          value={code}
+          onChange={(e) => {
+            setCode(normalizeRoomCode(e.target.value).slice(0, ROOM_CODE_LENGTH));
+            setError('');
+          }}
+          placeholder="K7M2QX"
+          inputMode="text"
+          autoCapitalize="characters"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          autoFocus
+          aria-invalid={!!error}
+          aria-describedby={error ? 'room-code-error' : undefined}
+        />
+        {error && (
+          <p id="room-code-error" className="field__error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <NameField value={name} onChange={setName} />
+
+      <div className="form-actions">
+        <button type="button" className="btn" onClick={onBack}>
+          Kembali
+        </button>
+        <button type="submit" className="btn btn--primary">
+          Gabung
+        </button>
+      </div>
+    </form>
   );
 }

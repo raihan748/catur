@@ -1,18 +1,23 @@
+import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router';
 import About from './routes/About.tsx';
 import Home from './routes/Home.tsx';
-import Local from './routes/Local.tsx';
 import NotFound from './routes/NotFound.tsx';
-import Room from './routes/Room.tsx';
+
+// Halaman permainan (chess.js, PeerJS, Zod) dimuat saat dibuka agar beranda tetap ringan.
+const Room = lazy(() => import('./routes/Room.tsx'));
+const Local = lazy(() => import('./routes/Local.tsx'));
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/r/:id" element={<Room />} />
-      <Route path="/lokal" element={<Local />} />
-      <Route path="/tentang" element={<About />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <Suspense fallback={null}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/r/:id" element={<Room />} />
+        <Route path="/lokal" element={<Local />} />
+        <Route path="/tentang" element={<About />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
   );
 }
