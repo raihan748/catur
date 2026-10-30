@@ -1,0 +1,30 @@
+# Dependensi & hasil build
+node_modules
+dist
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Environment
+.env
+.env.*
+!.env.example
+*.local
+
+# Test
+coverage
+test-results
+playwright-report
+playwright/.cache
+
+# Editor & OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.log
+
+# Pengaturan lokal Claude Code
+.claude/settings.local.json
