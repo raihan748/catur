@@ -1,0 +1,168 @@
+.board {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-board);
+  overflow: hidden;
+  container-type: inline-size;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.board__row {
+  display: contents;
+}
+
+.sq {
+  position: relative;
+  outline: none;
+}
+
+.sq--light {
+  background-color: var(--board-light);
+}
+
+.sq--dark {
+  background-color: var(--board-dark);
+}
+
+.sq--movable,
+.sq--target {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .sq--target:hover {
+    background-image: linear-gradient(var(--hl-hover), var(--hl-hover));
+  }
+}
+
+.sq:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  box-shadow: inset 0 0 0 3px var(--focus-ring);
+  pointer-events: none;
+}
+
+.sq__hl,
+.sq__check,
+.sq__hint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.sq__hl--last {
+  background: var(--hl-last);
+}
+
+.sq__hl--selected {
+  background: var(--hl-selected);
+}
+
+.sq__check {
+  background: var(--hl-check);
+}
+
+.sq__piece {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.sq__piece--ghosted {
+  opacity: 0.3;
+}
+
+.sq__hint {
+  z-index: 2;
+  background: radial-gradient(circle, var(--hl-legal) 0 16%, transparent 17%);
+}
+
+.sq__hint--capture {
+  background: radial-gradient(circle, transparent 0 74%, var(--hl-legal) 75%);
+}
+
+.sq__coord {
+  position: absolute;
+  z-index: 3;
+  font-size: max(9px, 2.4cqi);
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.sq__coord--rank {
+  top: 5%;
+  left: 6%;
+}
+
+.sq__coord--file {
+  right: 7%;
+  bottom: 5%;
+}
+
+.sq--light .sq__coord {
+  color: var(--board-dark);
+}
+
+.sq--dark .sq__coord {
+  color: var(--board-light);
+}
+
+.board__ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  width: 12.5%;
+  height: 12.5%;
+  pointer-events: none;
+  will-change: transform;
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.3));
+}
+
+.board__ghost svg {
+  width: 100%;
+  height: 100%;
+  transform: scale(1.12);
+}
+
+.promo {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.promo__choice {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.promo__choice:hover,
+.promo__choice:focus-visible {
+  outline: none;
+  background: var(--primary);
+}
+
+.promo__choice svg {
+  width: 100%;
+  height: 100%;
+}

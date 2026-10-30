@@ -7,6 +7,11 @@ export default function Home() {
       <h1>♞ C.A.T.U.R</h1>
       <p>Main catur langsung dengan temanmu. Tanpa akun.</p>
       <p>
+        <Link to="/lokal" className="btn btn--primary">
+          Main berdua di satu perangkat
+        </Link>
+      </p>
+      <p>
         <Link to="/tentang">Cara kerja</Link>
       </p>
     </main>

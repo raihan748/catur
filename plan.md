@@ -26,14 +26,15 @@ Acuan: [PRD.md](PRD.md) dan [design.md](design.md). Estimasi untuk 1 developer, 
 **Selesai bila**: halaman kosong tampil di URL `*.vercel.app` dan refresh di `/r/abc` tidak 404.
 
 ## Fase 1 — Papan & Aturan Lokal (3 hk)
-- [ ] `tokens.css` + tema terang/gelap
-- [ ] `game/engine.ts`: bungkus chess.js (`tryMove`, `legalMovesFrom`, `status`)
-- [ ] Komponen `Board` + `Piece` (SVG), flip, koordinat
-- [ ] Tap-tap dan drag (Pointer Events), highlight legal & langkah terakhir
-- [ ] `PromotionPicker`
-- [ ] `MoveList`, `CapturedPieces`
-- [ ] Mode "hot-seat" lokal untuk menguji aturan
-- [ ] Unit test engine: rokade, en passant, promosi, skakmat, stalemate, 3x repetisi, 50 langkah
+- [x] `tokens.css` + tema terang/gelap
+- [x] `game/engine.ts`: bungkus chess.js (`tryMove`, `legalTargets`, `result`, `snapshot`)
+- [x] Komponen `Board` + `Piece` (SVG buatan sendiri), flip, koordinat
+- [x] Tap-tap, drag (Pointer Events), keyboard; highlight legal, langkah terakhir & skak
+- [x] `PromotionPicker`
+- [x] `MoveList`, `CapturedPieces`, `PlayerBar`
+- [x] Mode "hot-seat" lokal di `/lokal` (dengan putar otomatis)
+- [x] Unit test engine: rokade, en passant, promosi, skakmat, stalemate, 3x repetisi, 50 langkah
+- [ ] Animasi gerak bidak 150 ms (dipindah ke Fase 5)
 
 **Selesai bila**: dua orang bisa menamatkan satu permainan di satu perangkat tanpa bug aturan.
 
