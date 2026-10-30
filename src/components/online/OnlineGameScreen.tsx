@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { opposite } from '../../game/engine.ts';
 import { colorTitle, moveText, resultText } from '../../game/labels.ts';
 import type { OnlineGameView, RematchState } from '../../game/onlineGame.ts';
 import type { Color, GameResult } from '../../game/types.ts';
-import type { ConnectionStatus, Role } from '../../net/session.ts';
+import type { ConnectionStatus, Role, SessionErrorCode } from '../../net/session.ts';
 import { useRoomStore } from '../../store/roomStore.ts';
 import { formatRoomCode } from '../../utils/roomCode.ts';
 import Board from '../board/Board.tsx';
@@ -37,7 +37,6 @@ export default function OnlineGameScreen({
   const move = useRoomStore((s) => s.move);
   const acceptDraw = useRoomStore((s) => s.acceptDraw);
   const declineDraw = useRoomStore((s) => s.declineDraw);
-  const retry = useRoomStore((s) => s.retry);
   const [flipped, setFlipped] = useState(false);
 
   const { snapshot, result, myColor } = view;
@@ -98,7 +97,7 @@ export default function OnlineGameScreen({
           </p>
 
           {!connected && (
-            <ConnectionBanner role={role} code={code} connection={connection} onRetry={retry} />
+            <ConnectionBanner role={role} code={code} connection={connection} view={view} />
           )}
 
           {view.drawOffer === 'them' && !result && (
@@ -160,8 +159,9 @@ function GameActions({ view, connected }: { view: OnlineGameView; connected: boo
   const [confirming, setConfirming] = useState(false);
 
   if (view.canAbort) {
+    // Boleh juga saat terputus: pesannya terkirim begitu lawan kembali.
     return (
-      <button type="button" className="btn" onClick={abort} disabled={!connected}>
+      <button type="button" className="btn" onClick={abort}>
         Batalkan permainan
       </button>
     );
@@ -241,41 +241,107 @@ type ConnectionBannerProps = {
   role: Role;
   code: string;
   connection: ConnectionStatus;
-  onRetry: () => void;
+  view: OnlineGameView;
 };
 
-function ConnectionBanner({ role, code, connection, onRetry }: ConnectionBannerProps) {
-  if (role === 'host') {
-    return (
-      <div className="banner banner--warn" role="status">
-        <p>
-          Lawan terputus. Menunggu ia tersambung kembali dengan kode{' '}
-          <strong>{formatRoomCode(code)}</strong>.
-        </p>
-        <p className="muted">Jam dijeda selama terputus.</p>
-      </div>
+const RETRY_HINTS: Partial<Record<SessionErrorCode, string>> = {
+  'not-found': 'Host belum membuka ruangan ini lagi.',
+  unreachable: 'Koneksi langsung ke lawan gagal; masih dicoba.',
+  network: 'Server penghubung tidak terjangkau.',
+};
+
+function ConnectionBanner({ role, code, connection, view }: ConnectionBannerProps) {
+  const retry = useRoomStore((s) => s.retry);
+  const retryReason = useRoomStore((s) => s.retryReason);
+  const claimAbandon = useRoomStore((s) => s.claimAbandon);
+  const online = useOnline();
+  const now = useNow(view.abandonAt !== null);
+  const waitMs = view.abandonAt === null ? null : Math.max(0, view.abandonAt - now);
+
+  const headline =
+    role === 'guest' ? (
+      <p className="banner__row">
+        <span className="spinner" aria-hidden="true" />
+        Koneksi terputus. Mencoba menyambung ulang…
+      </p>
+    ) : connection === 'creating' ? (
+      <p className="banner__row">
+        <span className="spinner" aria-hidden="true" />
+        Membuka ruangan kembali…
+      </p>
+    ) : (
+      <p>
+        Lawan terputus. Menunggu ia kembali ke ruangan <strong>{formatRoomCode(code)}</strong>.
+      </p>
     );
-  }
-  if (connection === 'connecting') {
-    return (
-      <div className="banner banner--warn" role="status">
-        <p className="banner__row">
-          <span className="spinner" aria-hidden="true" />
-          Menyambung ulang…
-        </p>
-      </div>
-    );
-  }
+
+  const hint = !online
+    ? 'Kamu sedang offline. Periksa Wi-Fi atau data seluler.'
+    : role === 'guest' && retryReason
+      ? RETRY_HINTS[retryReason]
+      : undefined;
+  const claimLabel = view.canAbort ? 'Batalkan permainan' : 'Klaim kemenangan';
+  const claimVerb = view.canAbort ? 'membatalkan permainan' : 'mengklaim kemenangan';
+
   return (
-    <div className="banner banner--warn" role="status">
-      <p>Koneksi ke lawan terputus. Jam dijeda.</p>
-      <div className="banner__actions">
-        <button type="button" className="btn btn--primary" onClick={onRetry}>
-          Sambung ulang
-        </button>
+    <div className="banner banner--warn">
+      {/* Hitung mundur sengaja di luar area live agar tidak dibacakan tiap detik. */}
+      <div className="banner__live" role="status">
+        {headline}
+        {hint && <p className="muted">{hint}</p>}
+        {waitMs === 0 && <p>Lawan belum kembali. Kamu boleh {claimVerb} atau terus menunggu.</p>}
       </div>
+      {view.clocks && !view.result && <p className="muted">Jam dijeda selama terputus.</p>}
+      {waitMs !== null && waitMs > 0 && (
+        <p className="muted">
+          Bila lawan belum kembali dalam {Math.ceil(waitMs / 1000)} dtk, kamu bisa {claimVerb}.
+        </p>
+      )}
+
+      {(role === 'guest' || waitMs === 0) && (
+        <div className="banner__actions">
+          {waitMs === 0 && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={claimAbandon}
+              disabled={!online}
+            >
+              {claimLabel}
+            </button>
+          )}
+          {role === 'guest' && (
+            <button type="button" className="btn" onClick={retry}>
+              Coba sekarang
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+const subscribeOnline = (onChange: () => void) => {
+  window.addEventListener('online', onChange);
+  window.addEventListener('offline', onChange);
+  return () => {
+    window.removeEventListener('online', onChange);
+    window.removeEventListener('offline', onChange);
+  };
+};
+
+/** navigator.onLine: false pasti offline; true belum tentu tersambung ke internet. */
+const useOnline = () => useSyncExternalStore(subscribeOnline, () => navigator.onLine);
+
+/** performance.now() yang diperbarui berkala selama `active`. */
+function useNow(active: boolean, intervalMs = 500) {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(performance.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [active, intervalMs]);
+  return now;
 }
 
 type ResultDialogProps = { title: string; detail: string; children: ReactNode };

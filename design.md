@@ -160,11 +160,12 @@ Papan tampil redup di latar; kartu di tengah berisi: tautan (tombol salin), kode
 State machine koneksi:
 
 ```
-idle → creating → waiting → connecting → connected
-                     ↑                       │
-                     └── reconnecting ←──────┘ (putus)
-connected → closed (lawan keluar/batas waktu reconnect 60 dtk)
+Host:  idle → creating → waiting → connected ⇄ disconnected (tamu putus; menunggu tamu yang sama)
+Tamu:  idle → connecting → connected ⇄ reconnecting (coba lagi sendiri, jeda 1 → 10 dtk)
+Galat fatal (penuh, versi, browser tidak didukung, ruangan tidak ada saat pertama masuk) → error
 ```
+
+Selama terputus jam dijeda. Setelah 60 dtk pemain yang menunggu boleh mengklaim kemenangan (`abandoned`) atau membatalkan permainan bila belum ada dua langkah, atau terus menunggu. Muat ulang halaman atau buka lagi tab yang tertutup memulihkan permainan dari `localStorage`.
 
 State permainan (`GameState`):
 

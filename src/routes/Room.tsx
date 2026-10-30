@@ -8,13 +8,15 @@ import { colorTitle } from '../game/labels.ts';
 import { timeControlDescription, type TimeControl } from '../game/timeControl.ts';
 import type { Color } from '../game/types.ts';
 import type { SessionErrorCode } from '../net/session.ts';
-import { parseHostRouteState, useRoomStore } from '../store/roomStore.ts';
+import { parseRouteState, useRoomStore } from '../store/roomStore.ts';
 import { formatRoomCode, isValidRoomCode, normalizeRoomCode } from '../utils/roomCode.ts';
 
-const ERRORS: Record<SessionErrorCode, { title: string; body: string; retry: boolean }> = {
+type ErrorInfo = { title: string; body: string; retry: boolean; help?: boolean };
+
+const ERRORS: Record<SessionErrorCode, ErrorInfo> = {
   'not-found': {
     title: 'Ruangan tidak ditemukan',
-    body: 'Ruangan dengan kode ini tidak ditemukan. Periksa kembali kodenya.',
+    body: 'Ruangan dengan kode ini tidak ditemukan. Periksa kembali kodenya, atau pastikan host masih membuka halaman ruangan.',
     retry: true,
   },
   full: { title: 'Ruangan penuh', body: 'Ruangan ini sudah penuh.', retry: false },
@@ -22,11 +24,13 @@ const ERRORS: Record<SessionErrorCode, { title: string; body: string; retry: boo
     title: 'Tidak bisa terhubung',
     body: 'Tidak bisa terhubung langsung. Coba ganti jaringan (Wi-Fi ↔ seluler).',
     retry: true,
+    help: true,
   },
   network: {
     title: 'Server penghubung tidak terjangkau',
     body: 'Periksa koneksi internetmu, lalu coba lagi.',
     retry: true,
+    help: true,
   },
   unsupported: {
     title: 'Browser tidak didukung',
@@ -50,11 +54,13 @@ export default function Room() {
   const code = normalizeRoomCode(id);
   const valid = isValidRoomCode(code);
   const location = useLocation();
-  const host = useMemo(() => parseHostRouteState(location.state), [location.state]);
+  const { host, resume } = useMemo(() => parseRouteState(location.state), [location.state]);
 
   const enter = useRoomStore((s) => s.enter);
   const leaveSoon = useRoomStore((s) => s.leaveSoon);
   const retry = useRoomStore((s) => s.retry);
+  const persist = useRoomStore((s) => s.persist);
+  const wake = useRoomStore((s) => s.wake);
   const storeCode = useRoomStore((s) => s.code);
   const role = useRoomStore((s) => s.role);
   const status = useRoomStore((s) => s.status);
@@ -65,9 +71,38 @@ export default function Room() {
 
   useEffect(() => {
     if (!valid) return;
-    enter({ code, host });
+    enter({ code, host, resume });
     return leaveSoon;
-  }, [valid, code, host, enter, leaveSoon]);
+  }, [valid, code, host, resume, enter, leaveSoon]);
+
+  // Simpan saat tab disembunyikan/ditutup (di HP tab latar belakang bisa dimatikan
+  // tanpa peringatan); periksa sambungan begitu tab terlihat lagi atau jaringan kembali.
+  useEffect(() => {
+    const onVisibility = () => (document.visibilityState === 'hidden' ? persist() : wake());
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', persist);
+    window.addEventListener('pageshow', wake);
+    window.addEventListener('online', wake);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', persist);
+      window.removeEventListener('pageshow', wake);
+      window.removeEventListener('online', wake);
+    };
+  }, [persist, wake]);
+
+  // Permainan tetap tersimpan, tetapi lawan harus menunggu: minta konfirmasi sebelum
+  // tab ditutup atau dimuat ulang di tengah permainan.
+  const playing = !!game && game.game > 0 && !game.result && opponentName !== null;
+  useEffect(() => {
+    if (!playing) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ''; // browser lama hanya mengenali cara ini
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [playing]);
 
   if (!valid) {
     return (
@@ -87,6 +122,11 @@ export default function Room() {
     return (
       <Notice title={e.title}>
         <p>{e.body}</p>
+        {e.help && (
+          <p>
+            <Link to="/tentang#koneksi">Bantuan koneksi</Link>
+          </p>
+        )}
         <div className="form-actions form-actions--start">
           {e.retry && (
             <button type="button" className="btn btn--primary" onClick={retry}>
@@ -99,32 +139,20 @@ export default function Room() {
     );
   }
 
-  if (status === 'creating') return <Notice title="Membuat ruangan…" busy />;
-
   // Host: belum ada tamu yang pernah masuk.
-  if (role === 'host' && (status === 'waiting' || !opponentName)) {
+  if (role === 'host' && opponentName === null) {
+    if (status === 'creating') return <Notice title="Membuat ruangan…" busy />;
     return <WaitingCard code={code} myColor={game.myColor} timeControl={game.timeControl} />;
   }
 
   // Tamu: belum menerima permainan dari host.
   if (role === 'guest' && game.game === 0) {
-    if (status === 'disconnected') {
-      return (
-        <Notice title="Koneksi terputus">
-          <p>Sambungan ke host terputus sebelum permainan dimulai.</p>
-          <div className="form-actions form-actions--start">
-            <button type="button" className="btn btn--primary" onClick={retry}>
-              Sambung ulang
-            </button>
-            <HomeLink />
-          </div>
-        </Notice>
-      );
-    }
     const title =
       status === 'connecting'
         ? `Menghubungkan ke ruangan ${formatRoomCode(code)}…`
-        : 'Menyiapkan permainan…';
+        : status === 'reconnecting'
+          ? `Menyambung ulang ke ruangan ${formatRoomCode(code)}…`
+          : 'Menyiapkan permainan…';
     return <Notice title={title} busy />;
   }
 

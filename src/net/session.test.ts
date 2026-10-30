@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMessage, type GameMessage } from './protocol.ts';
-import { HEARTBEAT_MS, PEER_TIMEOUT_MS, Session, type SessionErrorCode } from './session.ts';
+import {
+  HEARTBEAT_MS,
+  PEER_TIMEOUT_MS,
+  RECONNECT_BASE_MS,
+  RECONNECT_MAX_MS,
+  Session,
+  type SessionErrorCode,
+  type SessionOptions,
+} from './session.ts';
 import { TransportError, type Channel, type Transport } from './transport.ts';
 
 // --- Transport tiruan di memori (asinkron seperti DataChannel sungguhan) -----
@@ -79,10 +87,17 @@ const flush = async () => {
 
 const CODE = 'K7M2QX';
 
-function makePlayer(hub: MemoryHub, role: 'host' | 'guest', name: string, clientId = name) {
+function makePlayer(
+  hub: MemoryHub,
+  role: 'host' | 'guest',
+  name: string,
+  clientId = name,
+  options: SessionOptions = {},
+) {
   const log = {
     statuses: [] as string[],
     errors: [] as SessionErrorCode[],
+    retries: [] as SessionErrorCode[],
     connects: 0,
     messages: [] as GameMessage[],
     peers: [] as string[],
@@ -94,10 +109,12 @@ function makePlayer(hub: MemoryHub, role: 'host' | 'guest', name: string, client
     {
       onStatus: (s) => log.statuses.push(s),
       onError: (e) => log.errors.push(e),
+      onRetry: (e) => log.retries.push(e),
       onConnect: () => log.connects++,
       onMessage: (m) => log.messages.push(m),
       onPeer: (p) => log.peers.push(p.name),
     },
+    options,
   );
   return { session, log };
 }
@@ -203,15 +220,20 @@ describe('Session', () => {
     expect(guest.log.messages).toEqual([]);
   });
 
-  it('mendeteksi lawan yang diam lewat heartbeat', async () => {
+  it('mendeteksi lawan yang diam lewat heartbeat, lalu tamu menyambung ulang', async () => {
     const { hub, host, guest } = await connectedPair();
     hub.hostSides[0]!.muted = true; // pesan host tidak sampai lagi
 
-    await vi.advanceTimersByTimeAsync(PEER_TIMEOUT_MS + 2 * HEARTBEAT_MS);
+    await vi.advanceTimersByTimeAsync(PEER_TIMEOUT_MS + HEARTBEAT_MS);
     await flush();
-
-    expect(guest.session.status).toBe('disconnected');
+    expect(guest.session.status).toBe('reconnecting');
     expect(host.session.status).toBe('disconnected');
+
+    await vi.advanceTimersByTimeAsync(RECONNECT_BASE_MS);
+    await flush();
+    expect(guest.session.status).toBe('connected');
+    expect(host.session.status).toBe('connected');
+    expect(guest.log.connects).toBe(2);
   });
 
   it('tetap terhubung selama heartbeat berjalan', async () => {
@@ -219,5 +241,74 @@ describe('Session', () => {
     await vi.advanceTimersByTimeAsync(PEER_TIMEOUT_MS * 3);
     expect(host.session.status).toBe('connected');
     expect(guest.session.status).toBe('connected');
+  });
+
+  it('tidak langsung memutus setelah tab tertidur', async () => {
+    const { host, guest } = await connectedPair();
+    // Timer tertahan satu menit (tab di latar belakang), lalu berjalan lagi.
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    await flush();
+    expect(guest.session.status).toBe('connected');
+    expect(host.session.status).toBe('connected');
+  });
+
+  it('tamu menunggu host yang memuat ulang, dan host mengingat tamunya', async () => {
+    const { hub, host, guest } = await connectedPair();
+    host.session.close(); // halaman host dimuat ulang
+    await flush();
+    expect(guest.session.status).toBe('reconnecting');
+
+    await vi.advanceTimersByTimeAsync(RECONNECT_BASE_MS); // host belum kembali
+    await flush();
+    expect(guest.log.retries).toContain('not-found');
+    expect(guest.log.errors).toEqual([]);
+
+    // Host baru dipulihkan dari penyimpanan: hanya tamu lama yang boleh masuk.
+    const restored = makePlayer(hub, 'host', 'Ani', 'Ani', { guestClientId: 'Budi' });
+    await restored.session.host(CODE);
+    expect(restored.session.status).toBe('disconnected');
+
+    const intruder = makePlayer(hub, 'guest', 'Caca');
+    await intruder.session.join(CODE);
+    await flush();
+    expect(intruder.log.errors).toEqual(['full']);
+
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS);
+    await flush();
+    expect(guest.session.status).toBe('connected');
+    expect(restored.session.status).toBe('connected');
+  });
+
+  it('tamu yang melanjutkan permainan mencoba lagi bila host belum ada', async () => {
+    const hub = new MemoryHub();
+    const guest = makePlayer(hub, 'guest', 'Budi', 'Budi', { resume: true });
+    await guest.session.join(CODE);
+    expect(guest.log.errors).toEqual([]);
+    expect(guest.log.retries).toEqual(['not-found']);
+    expect(guest.session.status).toBe('reconnecting');
+
+    const host = makePlayer(hub, 'host', 'Ani');
+    await host.session.host(CODE);
+    guest.session.wake(); // tab terlihat lagi: coba sekarang, tanpa menunggu jeda
+    await flush();
+    expect(guest.session.status).toBe('connected');
+  });
+
+  it('berhenti menyambung ulang bila ditolak host', async () => {
+    const { hub, host, guest } = await connectedPair();
+    host.session.close();
+    await flush();
+
+    // Host lain (tanpa ingatan tamu lama) sudah menerima tamu berbeda.
+    const other = makePlayer(hub, 'host', 'Ani', 'Ani', { guestClientId: 'Caca' });
+    await other.session.host(CODE);
+    await vi.advanceTimersByTimeAsync(RECONNECT_BASE_MS);
+    await flush();
+
+    expect(guest.log.errors).toEqual(['full']);
+    expect(guest.session.status).toBe('error');
+    await vi.advanceTimersByTimeAsync(RECONNECT_MAX_MS * 2);
+    expect(guest.log.statuses.filter((s) => s === 'reconnecting')).toHaveLength(1);
   });
 });

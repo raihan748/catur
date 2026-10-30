@@ -68,12 +68,13 @@ Acuan: [PRD.md](PRD.md) dan [design.md](design.md). Estimasi untuk 1 developer, 
 **Selesai bila**: permainan lengkap host vs tamu berjalan sampai selesai dengan semua jenis hasil.
 
 ## Fase 4 — Ketahanan (2 hk)
-- [ ] Simpan snapshot (FEN, PGN, jam, ID ruangan, peran) ke `localStorage`
-- [ ] Reconnect otomatis dengan backoff; tamu & host saling `sync`
-- [ ] Batas waktu 60 dtk → hasil `abandoned` / opsi tunggu
-- [ ] Tangani tab background (Page Visibility) & `beforeunload`
-- [ ] Pesan diagnosis P2P gagal + halaman `/tentang` (bantuan koneksi)
-- [ ] Uji: matikan Wi-Fi 20 dtk, refresh tab, tutup-buka tab
+- [x] Simpan permainan (langkah, jam, peran, kode, clientId, nama) ke `localStorage` per ruangan (`store/savedRooms.ts`); Web Locks mencegah dua tab di browser yang sama berebut simpanan
+- [x] Reconnect otomatis tamu dengan backoff (1 → 10 dtk); host yang dipulihkan mengingat tamunya; tamu meminta `sync` setiap kali tersambung (setelah pesan tertunda terkirim)
+- [x] Batas waktu 60 dtk → klaim kemenangan (`abandoned`), atau batal bila belum ada dua langkah; boleh terus menunggu
+- [x] Tangani tab background (Page Visibility, `pagehide`, deteksi timer tertidur) & `beforeunload` selama bermain
+- [x] Pesan diagnosis P2P gagal + halaman `/tentang` (bantuan koneksi) + kartu "Lanjutkan" di beranda
+- [x] Uji: 9 test baru (sesi & `OnlineGame`) + uji manual dua tab: refresh host, refresh tamu, tutup-buka tab, klaim setelah 60 dtk, rematch
+- [ ] Uji matikan Wi-Fi 20 dtk di perangkat nyata (belum; heartbeat & sambung ulang sudah diuji lewat test)
 
 **Selesai bila**: refresh/putus sementara tidak menghilangkan permainan.
 

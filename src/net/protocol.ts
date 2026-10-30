@@ -54,6 +54,15 @@ const result = z.object({
 
 const gameOnly = z.object({ game: gameNo });
 
+const sync = z.object({
+  game: gameNo,
+  hostColor: color,
+  timeControl,
+  moves: z.array(moveInput).max(MAX_PLIES),
+  clocks: z.object({ w: clockMs, b: clockMs }).nullable(),
+  result: result.nullable(),
+});
+
 const payloads = {
   // Kendali sambungan
   hello: z.object({
@@ -69,14 +78,7 @@ const payloads = {
 
   // Permainan. `sync` membawa keadaan lengkap dari host (permainan baru, rematch,
   // sambung ulang, atau pemulihan saat posisi kedua sisi berbeda).
-  sync: z.object({
-    game: gameNo,
-    hostColor: color,
-    timeControl,
-    moves: z.array(moveInput).max(MAX_PLIES),
-    clocks: z.object({ w: clockMs, b: clockMs }).nullable(),
-    result: result.nullable(),
-  }),
+  sync,
   sync_request: z.object({}),
   move: moveInput.extend({
     game: gameNo,
@@ -88,6 +90,8 @@ const payloads = {
   }),
   resign: gameOnly,
   abort: gameOnly,
+  /** Pengirim menang karena lawan terputus terlalu lama. */
+  abandon: gameOnly,
   timeout: gameOnly.extend({ color }),
   draw_offer: gameOnly,
   draw_accept: gameOnly,
@@ -116,6 +120,7 @@ export const messageSchema = z.discriminatedUnion('t', [
   envelope('move'),
   envelope('resign'),
   envelope('abort'),
+  envelope('abandon'),
   envelope('timeout'),
   envelope('draw_offer'),
   envelope('draw_accept'),
@@ -136,6 +141,12 @@ export type GameMessage = Extract<Message, { t: SequencedType }>;
 
 export function parseMessage(raw: unknown): Message | null {
   const parsed = messageSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Validasi keadaan permainan tersimpan (bentuknya sama dengan isi `sync`). */
+export function parseGameState(raw: unknown): Payload<'sync'> | null {
+  const parsed = sync.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
 

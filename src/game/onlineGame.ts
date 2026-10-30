@@ -24,6 +24,11 @@ export type OnlineGameView = {
   canAbort: boolean;
   drawOffer: Offer;
   rematch: RematchState;
+  /**
+   * `now()` saat lawan yang terputus boleh dinyatakan meninggalkan permainan
+   * (lihat `claimAbandon`); null bila tidak sedang menunggu lawan.
+   */
+  abandonAt: number | null;
   /** Pemberitahuan singkat untuk toast; id berubah tiap pemberitahuan baru. */
   notice: { id: number; text: string } | null;
 };
@@ -39,6 +44,9 @@ type OnlineGameOptions = {
 
 /** Selisih jam yang masih diterima saat lawan menyatakan waktu habis (latensi jaringan). */
 export const TIMEOUT_TOLERANCE_MS = 1_500;
+
+/** Lama lawan terputus sebelum kemenangan boleh diklaim. */
+export const ABANDON_MS = 60_000;
 
 /**
  * Logika satu permainan online di satu sisi. Aturan dijalankan di kedua sisi;
@@ -62,6 +70,8 @@ export class OnlineGame {
   private drawOffer: Offer = null;
   private rematch: RematchState = null;
   private connected = false;
+  /** `now()` saat sambungan putus; null = belum pernah tersambung atau sedang tersambung. */
+  private disconnectedAt: number | null = null;
   private notice: { id: number; text: string } | null = null;
 
   constructor({ role, send, onChange, now = () => performance.now() }: OnlineGameOptions) {
@@ -92,6 +102,13 @@ export class OnlineGame {
     return !!this.clocks && this.connected && !this.result() && this.engine.ply >= 1;
   }
 
+  private get abandonAt() {
+    if (this.connected || this.disconnectedAt === null || !this.started || this.result()) {
+      return null;
+    }
+    return this.disconnectedAt + ABANDON_MS;
+  }
+
   result(): GameResult | undefined {
     return this.endResult ?? this.engine.result();
   }
@@ -110,8 +127,29 @@ export class OnlineGame {
       canAbort: this.canAbort,
       drawOffer: this.drawOffer,
       rematch: this.rematch,
+      abandonAt: this.abandonAt,
       notice: this.notice,
     };
+  }
+
+  /** Keadaan lengkap (isi `sync`, juga yang disimpan); null sebelum permainan dimulai. */
+  state(): Payload<'sync'> | null {
+    if (!this.started) return null;
+    return {
+      game: this.game,
+      hostColor: this.hostColor,
+      timeControl: this.timeControl,
+      moves: this.engine.moveList(),
+      clocks: this.clocks && this.currentClocks(),
+      result: this.result() ?? null,
+    };
+  }
+
+  /** Pulihkan keadaan tersimpan setelah halaman dimuat ulang; jam dijeda sampai tersambung. */
+  restore(state: Payload<'sync'>) {
+    if (!this.load(state)) return;
+    this.disconnectedAt = this.now();
+    this.changed();
   }
 
   // --- Sambungan -----------------------------------------------------------
@@ -126,6 +164,10 @@ export class OnlineGame {
     }
     this.connected = connected;
     this.turnStartedAt = now;
+    this.disconnectedAt = connected ? null : now;
+    // Tamu meminta keadaan lengkap setiap kali tersambung. Pesan yang tertunda selama
+    // terputus (mis. menyerah) dikirim ulang lebih dulu, jadi balasan host sudah memuatnya.
+    if (connected && this.role === 'guest') this.send('sync_request', {});
     this.changed();
   }
 
@@ -147,20 +189,14 @@ export class OnlineGame {
     this.changed();
   }
 
-  /** Host: kirim keadaan lengkap ke tamu (tersambung, diminta, atau permainan baru). */
+  /** Host: kirim keadaan lengkap ke tamu (diminta, posisi berbeda, atau permainan baru). */
   sendSync() {
-    if (this.role !== 'host' || !this.started) return;
+    const state = this.state();
+    if (this.role !== 'host' || !state) return;
     // Tawaran yang sedang berjalan dibatalkan agar kedua sisi kembali sama.
     this.drawOffer = null;
     if (this.rematch !== 'starting') this.rematch = null;
-    this.send('sync', {
-      game: this.game,
-      hostColor: this.hostColor,
-      timeControl: this.timeControl,
-      moves: this.engine.moveList(),
-      clocks: this.clocks && this.currentClocks(),
-      result: this.result() ?? null,
-    });
+    this.send('sync', state);
   }
 
   // --- Aksi pemain ---------------------------------------------------------
@@ -248,6 +284,22 @@ export class OnlineGame {
     this.beginRematch();
   }
 
+  /**
+   * Lawan terputus lebih dari ABANDON_MS: menang karena ditinggal, atau batal bila belum
+   * ada dua langkah. Bila lawan kembali, pesan ini sampai lebih dulu daripada `sync`.
+   */
+  claimAbandon() {
+    const at = this.abandonAt;
+    if (at === null || this.now() < at) return;
+    if (this.engine.ply < 2) {
+      this.finish({ reason: 'aborted' });
+      this.send('abort', { game: this.game });
+    } else {
+      this.finish({ winner: this.myColor, reason: 'abandoned' });
+      this.send('abandon', { game: this.game });
+    }
+  }
+
   /** Dipanggil berkala: nyatakan waktu habis bila jam pihak yang melangkah mencapai 0. */
   tick() {
     this.flagIfExpired();
@@ -272,6 +324,8 @@ export class OnlineGame {
       case 'abort':
         if (this.canAbort) this.finish({ reason: 'aborted' });
         return;
+      case 'abandon':
+        return this.finish({ winner: opposite(this.myColor), reason: 'abandoned' });
       case 'timeout':
         return this.applyTimeoutClaim(msg.d.color);
       case 'draw_offer':
@@ -330,9 +384,13 @@ export class OnlineGame {
   }
 
   private applySync(d: Payload<'sync'>) {
-    if (this.role === 'host') return;
+    if (this.role === 'host' || !this.load(d)) return;
+    this.changed();
+  }
+
+  private load(d: Payload<'sync'>): boolean {
     const engine = GameEngine.fromMoves(d.moves);
-    if (!engine) return;
+    if (!engine) return false;
     this.game = d.game;
     this.hostColor = d.hostColor;
     this.timeControl = d.timeControl;
@@ -342,7 +400,7 @@ export class OnlineGame {
     this.endResult = d.result;
     this.drawOffer = null;
     this.rematch = null;
-    this.changed();
+    return true;
   }
 
   private applyTimeoutClaim(color: Color) {

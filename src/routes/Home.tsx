@@ -10,8 +10,10 @@ import {
 } from '../game/timeControl.ts';
 import type { Color } from '../game/types.ts';
 import { loadName, MAX_NAME_LENGTH, saveName } from '../net/identity.ts';
-import type { HostRouteState } from '../store/roomStore.ts';
+import type { HostRouteState, ResumeRouteState } from '../store/roomStore.ts';
+import { listResumableRooms, removeRoom, type ResumableRoom } from '../store/savedRooms.ts';
 import {
+  formatRoomCode,
   generateRoomCode,
   isValidRoomCode,
   normalizeRoomCode,
@@ -36,16 +38,19 @@ export default function Home() {
         ) : mode === 'gabung' ? (
           <JoinForm onBack={() => choose(null)} />
         ) : (
-          <div className="choices">
-            <button type="button" className="choice" onClick={() => choose('host')}>
-              <span className="choice__title">Jadi Host</span>
-              <span className="choice__desc">Buat ruangan dan dapatkan kode untuk lawanmu.</span>
-            </button>
-            <button type="button" className="choice" onClick={() => choose('gabung')}>
-              <span className="choice__title">Gabung Ruangan</span>
-              <span className="choice__desc">Punya kode dari temanmu? Masukkan di sini.</span>
-            </button>
-          </div>
+          <>
+            <ResumeList />
+            <div className="choices">
+              <button type="button" className="choice" onClick={() => choose('host')}>
+                <span className="choice__title">Jadi Host</span>
+                <span className="choice__desc">Buat ruangan dan dapatkan kode untuk lawanmu.</span>
+              </button>
+              <button type="button" className="choice" onClick={() => choose('gabung')}>
+                <span className="choice__title">Gabung Ruangan</span>
+                <span className="choice__desc">Punya kode dari temanmu? Masukkan di sini.</span>
+              </button>
+            </div>
+          </>
         )}
 
         <nav className="home__links" aria-label="Lainnya">
@@ -54,6 +59,47 @@ export default function Home() {
         </nav>
       </main>
     </div>
+  );
+}
+
+/** Permainan yang tabnya tertutup di tengah jalan; bisa dilanjutkan selama lawan menunggu. */
+function ResumeList() {
+  const [rooms, setRooms] = useState(listResumableRooms);
+  if (rooms.length === 0) return null;
+
+  const dismiss = (room: ResumableRoom) => {
+    removeRoom(room.code, room.role);
+    setRooms(listResumableRooms());
+  };
+
+  return (
+    <section className="card" aria-labelledby="resume-title">
+      <h2 id="resume-title" className="card__title">
+        Permainan belum selesai
+      </h2>
+      <ul className="resume">
+        {rooms.map((room) => (
+          <li key={`${room.code}:${room.role}`} className="resume__item">
+            <span>
+              <strong>{formatRoomCode(room.code)}</strong> · kamu{' '}
+              {room.myColor === 'w' ? 'Putih' : 'Hitam'} melawan {room.opponentName || 'lawan'}
+            </span>
+            <span className="resume__actions">
+              <Link
+                to={`/r/${room.code}`}
+                state={{ resume: room.role } satisfies ResumeRouteState}
+                className="btn btn--primary"
+              >
+                Lanjutkan
+              </Link>
+              <button type="button" className="btn btn--ghost" onClick={() => dismiss(room)}>
+                Abaikan
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -18,7 +18,16 @@ import {
 export type Role = 'host' | 'guest';
 
 export type ConnectionStatus =
-  'idle' | 'creating' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'error';
+  | 'idle'
+  | 'creating'
+  | 'waiting'
+  | 'connecting'
+  | 'connected'
+  /** Tamu: terputus dan sedang mencoba menyambung ulang sendiri. */
+  | 'reconnecting'
+  /** Host: tamu terputus; menunggu ia tersambung kembali. */
+  | 'disconnected'
+  | 'error';
 
 export type SessionErrorCode = TransportErrorCode | 'full' | 'version';
 
@@ -26,18 +35,40 @@ export type Identity = { name: string; clientId: string };
 
 export type SessionHandlers = {
   onStatus?: (status: ConnectionStatus) => void;
-  onPeer?: (peer: { name: string }) => void;
+  onPeer?: (peer: { name: string; clientId: string }) => void;
   /** Sambungan terbentuk atau pulih (kedua sisi sudah bertukar hello). */
   onConnect?: () => void;
   /** Pesan permainan (bernomor), sudah lolos validasi dan bebas duplikat. */
   onMessage?: (message: GameMessage) => void;
+  /** Percobaan sambung ulang gagal karena galat sementara; akan dicoba lagi. */
+  onRetry?: (code: SessionErrorCode) => void;
+  /** Galat yang menghentikan sesi. */
   onError?: (code: SessionErrorCode) => void;
+};
+
+export type SessionOptions = {
+  /**
+   * Tamu: melanjutkan permainan tersimpan. Galat sementara pada percobaan pertama
+   * (mis. host juga sedang memuat ulang) berarti coba lagi, bukan gagal.
+   */
+  resume?: boolean;
+  /** Host: tamu yang sudah memegang kursi lawan (dipulihkan dari penyimpanan). */
+  guestClientId?: string | null;
 };
 
 export const HEARTBEAT_MS = 5_000;
 export const PEER_TIMEOUT_MS = 15_000;
 export const HELLO_TIMEOUT_MS = 8_000;
+export const RECONNECT_BASE_MS = 1_000;
+export const RECONNECT_MAX_MS = 10_000;
 const REJECT_CLOSE_DELAY_MS = 500;
+
+/** Galat yang bisa hilang sendiri: host sedang memuat ulang, jaringan putus sebentar. */
+const TRANSIENT_ERRORS: ReadonlySet<SessionErrorCode> = new Set([
+  'not-found',
+  'unreachable',
+  'network',
+]);
 
 const toErrorCode = (err: unknown): SessionErrorCode =>
   err instanceof TransportError ? err.code : 'network';
@@ -45,8 +76,9 @@ const toErrorCode = (err: unknown): SessionErrorCode =>
 /**
  * Protokol di atas satu Channel: handshake hello, nomor urut + ack, buang
  * duplikat, dan heartbeat. Host hanya menerima satu tamu; setelah itu hanya
- * tamu yang sama (clientId sama) yang boleh tersambung ulang. Isi permainan
- * diurus lapisan di atasnya (OnlineGame).
+ * tamu yang sama (clientId sama) yang boleh tersambung ulang. Tamu yang pernah
+ * tersambung menyambung ulang sendiri dengan jeda yang makin panjang. Isi
+ * permainan diurus lapisan di atasnya (OnlineGame).
  */
 export class Session {
   readonly role: Role;
@@ -57,16 +89,21 @@ export class Session {
   private readonly handlers: SessionHandlers;
   private readonly sessionId = crypto.randomUUID();
 
+  private code = '';
   private channel: Channel | null = null;
-  private guestClientId: string | null = null;
+  private guestClientId: string | null;
   private peerSessionId: string | null = null;
   private seq = 0;
   private lastSeen = 0;
   /** Pesan bernomor yang belum di-ack; dikirim ulang saat sambungan pulih. */
   private readonly pending = new Map<number, Message>();
   private lastHeard = 0;
+  /** Tamu: galat sementara berarti coba lagi (sudah pernah tersambung, atau melanjutkan). */
+  private autoReconnect: boolean;
+  private reconnectAttempts = 0;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private helloTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
   constructor(
@@ -74,36 +111,31 @@ export class Session {
     role: Role,
     identity: Identity,
     handlers: SessionHandlers = {},
+    options: SessionOptions = {},
   ) {
     this.transport = transport;
     this.role = role;
     this.identity = identity;
     this.handlers = handlers;
+    this.guestClientId = options.guestClientId ?? null;
+    this.autoReconnect = role === 'guest' && !!options.resume;
   }
 
   async host(code: string) {
+    this.code = code;
     this.setStatus('creating');
     try {
       await this.transport.listen(code, (ch) => this.accept(ch));
-      if (!this.closed) this.setStatus('waiting');
+      if (!this.closed) this.setStatus(this.guestClientId ? 'disconnected' : 'waiting');
     } catch (err) {
       this.fail(toErrorCode(err));
     }
   }
 
-  /** Sambung (atau sambung ulang) ke host. */
+  /** Sambung ke host. */
   async join(code: string) {
-    this.setStatus('connecting');
-    try {
-      const ch = await this.transport.connect(code);
-      if (this.closed) return ch.close();
-      this.attach(ch);
-      this.sendControl('hello', this.helloPayload());
-      // Tamu dianggap terhubung setelah host membalas hello.
-      this.helloTimer = setTimeout(() => this.fail('unreachable'), HELLO_TIMEOUT_MS);
-    } catch (err) {
-      this.fail(toErrorCode(err));
-    }
+    this.code = code;
+    await this.attempt();
   }
 
   /** Kirim pesan bernomor; yang belum di-ack dikirim ulang setelah sambungan pulih. */
@@ -111,6 +143,21 @@ export class Session {
     const msg = createMessage(t, ++this.seq, d);
     this.pending.set(msg.n, msg);
     this.channel?.send(msg);
+  }
+
+  /**
+   * Tab kembali terlihat atau jaringan kembali: periksa sambungan dengan ping,
+   * atau langsung coba sambung ulang tanpa menunggu jeda.
+   */
+  wake() {
+    if (this.closed) return;
+    if (this.channel && this.status === 'connected') {
+      this.sendControl('ping', {});
+    } else if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectAttempts = 0;
+      void this.attempt();
+    }
   }
 
   close() {
@@ -155,6 +202,36 @@ export class Session {
     };
   }
 
+  // --- tamu ---------------------------------------------------------------
+
+  private async attempt() {
+    this.reconnectTimer = null;
+    this.setStatus(this.autoReconnect ? 'reconnecting' : 'connecting');
+    try {
+      const ch = await this.transport.connect(this.code);
+      if (this.closed) return ch.close();
+      this.attach(ch);
+      this.sendControl('hello', this.helloPayload());
+      // Tamu dianggap terhubung setelah host membalas hello.
+      this.helloTimer = setTimeout(() => this.attemptFailed('unreachable'), HELLO_TIMEOUT_MS);
+    } catch (err) {
+      this.attemptFailed(toErrorCode(err));
+    }
+  }
+
+  /** Percobaan tamu gagal: coba lagi nanti bila galatnya sementara, selain itu berhenti. */
+  private attemptFailed(code: SessionErrorCode) {
+    if (this.closed) return;
+    if (!this.autoReconnect || !TRANSIENT_ERRORS.has(code)) return this.fail(code);
+    this.detach()?.close();
+    this.stopTimers();
+    this.handlers.onRetry?.(code);
+    this.setStatus('reconnecting');
+    const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => void this.attempt(), delay);
+  }
+
   // --- bersama ------------------------------------------------------------
 
   private receive(raw: unknown) {
@@ -191,6 +268,9 @@ export class Session {
 
   /** Kedua sisi sudah bertukar hello. */
   private established() {
+    // Mulai sekarang tamu menyambung ulang sendiri bila putus.
+    this.autoReconnect = this.role === 'guest';
+    this.reconnectAttempts = 0;
     // Kirim ulang dulu pesan lama agar nomor urut tetap naik di sisi penerima.
     this.resendPending();
     this.setStatus('connected');
@@ -203,7 +283,7 @@ export class Session {
       this.peerSessionId = hello.sessionId;
       this.lastSeen = 0;
     }
-    this.handlers.onPeer?.({ name: hello.name });
+    this.handlers.onPeer?.({ name: hello.name, clientId: hello.clientId });
   }
 
   private attach(ch: Channel) {
@@ -227,7 +307,8 @@ export class Session {
     if (ch !== this.channel || this.closed) return;
     this.detach();
     this.stopTimers();
-    this.setStatus('disconnected');
+    if (this.role === 'guest') this.attemptFailed('unreachable');
+    else this.setStatus('disconnected');
   }
 
   private fail(code: SessionErrorCode) {
@@ -239,10 +320,18 @@ export class Session {
 
   private startHeartbeat() {
     if (this.heartbeat) clearInterval(this.heartbeat);
+    let lastTick = Date.now();
     this.heartbeat = setInterval(() => {
       const ch = this.channel;
       if (!ch) return;
-      if (Date.now() - this.lastHeard > PEER_TIMEOUT_MS) {
+      const now = Date.now();
+      // Timer sempat tertunda lama (tab tertidur di latar belakang): beri lawan
+      // kesempatan membalas ping dulu sebelum dianggap putus.
+      if (now - lastTick > 2 * HEARTBEAT_MS) {
+        this.lastHeard = Math.max(this.lastHeard, now - PEER_TIMEOUT_MS + HEARTBEAT_MS);
+      }
+      lastTick = now;
+      if (now - this.lastHeard > PEER_TIMEOUT_MS) {
         this.lost(ch);
         ch.close();
         return;
@@ -253,7 +342,9 @@ export class Session {
 
   private stopTimers() {
     if (this.heartbeat) clearInterval(this.heartbeat);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.heartbeat = null;
+    this.reconnectTimer = null;
     this.clearHelloTimer();
   }
 
@@ -280,6 +371,7 @@ export class Session {
   }
 
   private setStatus(status: ConnectionStatus) {
+    if (status === this.status) return;
     this.status = status;
     this.handlers.onStatus?.(status);
   }

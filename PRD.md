@@ -101,18 +101,21 @@ Semua pesan JSON: `{ v:1, t:<tipe>, n:<nomor urut>, ts:<epoch ms>, d:<payload> }
 |---|---|---|
 | `hello` | keduanya | `{ name, clientId, sessionId, protocol }` |
 | `reject` | host→tamu | `{ reason: 'full' \| 'version' }` |
-| `sync` | host→tamu | `{ game, hostColor, timeControl, moves[], clocks, result }` — keadaan lengkap: permainan baru, rematch, sambung ulang, atau pemulihan |
-| `sync_request` | tamu→host | `{}` — tamu mendeteksi posisi tidak cocok |
+| `sync` | host→tamu | `{ game, hostColor, timeControl, moves[], clocks, result }` — keadaan lengkap: jawaban `sync_request`, permainan baru, rematch, atau pemulihan |
+| `sync_request` | tamu→host | `{}` — dikirim tamu setiap kali tersambung, dan saat posisi tidak cocok |
 | `move` | keduanya | `{ game, ply, from, to, promotion?, san, clockMs }` |
 | `ack` | keduanya | `{ n }` |
 | `resign` / `abort` / `draw_offer` / `draw_accept` / `draw_decline` | keduanya | `{ game }` |
 | `timeout` | keduanya | `{ game, color }` — diterima bila jam penerima juga ≤ 1,5 dtk |
+| `abandon` | keduanya | `{ game }` — pengirim menang karena lawan terputus ≥ 60 dtk |
 | `rematch_offer` / `rematch_accept` | keduanya | `{ game }` |
 | `chat` | keduanya | `{ text }` (Fase 5) |
 | `ping` / `pong` | keduanya | `{}` |
 
 Aturan: pesan tidak dikenal diabaikan; payload divalidasi skema (mis. Zod) sebelum diproses.
 Pesan kendali (`hello`, `reject`, `ack`, `ping`, `pong`) memakai `n = 0` dan tidak di-ack; pesan lain bernomor urut, di-ack, dan duplikat dibuang. `clientId` (per tab) mengenali tamu yang sama saat sambung ulang; `sessionId` (per muat halaman) mengatur ulang hitungan nomor urut. Pesan permainan membawa `game` (nomor permainan, naik tiap rematch) sehingga sisa pesan permainan lama diabaikan. Host adalah sumber kebenaran bila posisi kedua sisi berbeda.
+
+Sambung ulang: tamu yang terputus mencoba lagi sendiri (jeda 1 → 10 dtk). Saat tersambung, pesan yang tertunda dikirim lebih dulu, lalu tamu mengirim `sync_request`; jadi `sync` balasan host sudah memuat aksi yang dilakukan selama terputus (mis. menyerah). Keadaan permainan disimpan di `localStorage` per ruangan, sehingga host maupun tamu bisa memuat ulang atau menutup tab lalu melanjutkan. Host yang dipulihkan hanya menerima `clientId` tamu yang lama.
 
 ## 9. Risiko & Mitigasi
 

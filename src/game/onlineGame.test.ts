@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createMessage, parseMessage, type GameMessage } from '../net/protocol.ts';
 import type { Role } from '../net/session.ts';
-import { OnlineGame, TIMEOUT_TOLERANCE_MS } from './onlineGame.ts';
+import { ABANDON_MS, OnlineGame, TIMEOUT_TOLERANCE_MS } from './onlineGame.ts';
 import type { TimeControl } from './timeControl.ts';
 import type { Color, MoveInput, Square } from './types.ts';
 
@@ -286,5 +286,92 @@ describe('OnlineGame', () => {
     const { host } = setup();
     inject(host, 'resign', { game: 7 });
     expect(host.game.view().result).toBeUndefined();
+  });
+
+  it('menyimpan dan memulihkan keadaan permainan (muat ulang halaman)', () => {
+    const ctx = setup({ hostColor: 'b', timeControl: { initialMs: 60_000, incrementMs: 1_000 } });
+    play(ctx, ['e2e4']);
+    ctx.advance(4_000);
+    play(ctx, ['e7e5']); // hitam (host): 60 − 4 + 1 dtk
+    ctx.advance(2_500); // jam putih sedang berjalan
+
+    const state = ctx.host.game.state();
+    expect(state).toEqual({
+      game: 1,
+      hostColor: 'b',
+      timeControl: { initialMs: 60_000, incrementMs: 1_000 },
+      moves: [uci('e2e4'), uci('e7e5')],
+      clocks: { w: 57_500, b: 57_000 },
+      result: null,
+    });
+    expect(parseMessage(createMessage('sync', 1, state!))).not.toBeNull();
+
+    const restored = new OnlineGame({
+      role: 'host',
+      send: () => {},
+      onChange: () => {},
+      now: () => 0,
+    });
+    restored.restore(state!);
+    const v = restored.view();
+    expect(v.myColor).toBe('b');
+    expect(v.snapshot.fen).toBe(ctx.host.game.view().snapshot.fen);
+    expect(v.clocks).toEqual({ w: 57_500, b: 57_000 });
+    expect(v.clockRunning).toBe(false); // dijeda sampai lawan tersambung lagi
+    expect(v.abandonAt).toBe(ABANDON_MS);
+  });
+
+  it('pesan yang tertunda saat terputus diproses host sebelum sync', () => {
+    const ctx = setup({ hostColor: 'w' });
+    play(ctx, ['e2e4', 'e7e5']);
+    ctx.host.game.setConnected(false);
+    ctx.guest.game.setConnected(false);
+    ctx.guest.game.resign(); // terkirim begitu tersambung lagi
+
+    ctx.host.game.setConnected(true);
+    ctx.guest.game.setConnected(true); // tamu meminta sync setelah pesan tertunda
+    ctx.deliver();
+
+    expect(ctx.guest.sent.slice(-2)).toEqual(['resign', 'sync_request']);
+    const expected = { winner: 'w', reason: 'resign' };
+    expect(ctx.host.game.view().result).toEqual(expected);
+    expect(ctx.guest.game.view().result).toEqual(expected);
+  });
+
+  it('lawan yang terputus 60 dtk boleh dinyatakan meninggalkan permainan', () => {
+    const ctx = setup({ hostColor: 'w' });
+    play(ctx, ['e2e4', 'e7e5']);
+    ctx.host.game.setConnected(false);
+    expect(ctx.host.game.view().abandonAt).toBe(ABANDON_MS);
+
+    ctx.advance(ABANDON_MS - 1);
+    ctx.host.game.claimAbandon(); // terlalu cepat
+    expect(ctx.host.game.view().result).toBeUndefined();
+
+    ctx.advance(1);
+    ctx.host.game.claimAbandon();
+    const expected = { winner: 'w', reason: 'abandoned' };
+    expect(ctx.host.game.view().result).toEqual(expected);
+    expect(ctx.host.game.view().abandonAt).toBeNull();
+
+    ctx.deliver(); // tamu kembali dan menerima klaim
+    expect(ctx.guest.game.view().result).toEqual(expected);
+  });
+
+  it('klaim sebelum langkah kedua membatalkan permainan', () => {
+    const ctx = setup({ hostColor: 'w' });
+    play(ctx, ['e2e4']);
+    ctx.guest.game.setConnected(false);
+    ctx.advance(ABANDON_MS);
+    ctx.guest.game.claimAbandon();
+    ctx.deliver();
+    expect(ctx.guest.game.view().result).toEqual({ reason: 'aborted' });
+    expect(ctx.host.game.view().result).toEqual({ reason: 'aborted' });
+  });
+
+  it('tidak ada batas tunggu sebelum lawan pernah masuk', () => {
+    const host = new OnlineGame({ role: 'host', send: () => {}, onChange: () => {}, now: () => 0 });
+    host.startNew('w', null);
+    expect(host.view().abandonAt).toBeNull();
   });
 });
