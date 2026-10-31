@@ -93,12 +93,14 @@ Acuan: [PRD.md](PRD.md) dan [design.md](design.md). Estimasi untuk 1 developer, 
 **Selesai bila**: Lighthouse Performance & Accessibility ≥ 90; checklist QA di design.md §10 lulus.
 
 ## Fase 6 — Rilis (1 hk)
-- [ ] Domain kustom di Vercel + HTTPS
-- [ ] Verifikasi CSP tidak memblokir PeerJS/STUN di produksi
-- [ ] Vercel Web Analytics (opsional, tanpa cookie)
+- [ ] Domain kustom di Vercel + HTTPS (langkahnya di README; dilakukan pemilik di dashboard Vercel & DNS)
+- [x] Verifikasi CSP: `npm run preview` kini memakai header dari `vercel.json`; host + tamu, langkah, obrolan, service worker, dan manifest berjalan tanpa satu pun pelanggaran CSP
+- [ ] Cek ulang CSP & koneksi di domain produksi setelah deploy
+- [ ] Vercel Web Analytics (opsional, tanpa cookie) — belum dipasang, menunggu keputusan pemilik
 - [ ] Tes lintas jaringan (Wi-Fi ↔ seluler) dengan teman
-- [ ] README: cara menjalankan, struktur, cara deploy
-- [ ] Tag `v0.1.0`
+- [x] README: cara menjalankan, cara kerja, struktur, cara deploy & domain
+- [x] Meta pratinjau tautan (Open Graph) dan versi `0.1.0` di package.json
+- [x] Tag `v0.1.0`
 
 ## Total Estimasi
 
@@ -123,5 +125,7 @@ Atau cukup *Import Git Repository* di dashboard Vercel: framework **Vite**, buil
 
 ## Langkah Berikutnya
 
-1. Keputusan sudah final: UI Indonesia, domain sudah ada, tanpa TURN, alur Host/Gabung dengan kode.
-2. Jalankan Fase 0 (setup proyek + deploy pertama ke Vercel).
+1. Pasang domain di Vercel, lalu cek ulang CSP & koneksi di produksi.
+2. Uji di perangkat nyata: iOS Safari & Android Chrome, Wi-Fi ↔ seluler, matikan Wi-Fi 20 dtk.
+3. Jalankan Lighthouse (mis. PageSpeed Insights) di domain produksi; target ≥ 90.
+4. Kandidat v0.2/v0.3 (PRD §11): tema papan, analisis/engine, main vs komputer, TURN bila banyak yang gagal terhubung.

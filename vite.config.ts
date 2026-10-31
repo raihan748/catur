@@ -42,8 +42,23 @@ function serviceWorker(): Plugin {
   };
 }
 
+type VercelConfig = { headers: { source: string; headers: { key: string; value: string }[] }[] };
+
+/**
+ * Header keamanan (termasuk CSP) dari vercel.json, juga dipakai `vite preview` agar
+ * build produksi bisa diuji lokal dengan aturan yang sama persis seperti di Vercel.
+ */
+function productionHeaders(): Record<string, string> {
+  const config = JSON.parse(
+    readFileSync(new URL('./vercel.json', import.meta.url), 'utf8'),
+  ) as VercelConfig;
+  const all = config.headers.find((h) => h.source === '/(.*)')?.headers ?? [];
+  return Object.fromEntries(all.map((h) => [h.key, h.value]));
+}
+
 export default defineConfig({
   plugins: [react(), serviceWorker()],
+  preview: { headers: productionHeaders() },
   test: {
     include: ['src/**/*.test.ts'],
     passWithNoTests: true,
